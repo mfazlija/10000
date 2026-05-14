@@ -19,7 +19,7 @@
 
         const { useState, useEffect, useCallback } = React;
 
-        // Ta configuration Firebase personnelle
+        // Ta configuration Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
             authDomain: "project-688816839048633365.firebaseapp.com",
@@ -33,18 +33,15 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // Calcule les points d'une sélection de dés et vérifie si elle est valide
         const getScoreDetails = (diceValues) => {
             if (diceValues.length === 0) return { score: 0, isValid: false, unused: [] };
             
             let counts = {};
             diceValues.forEach(d => counts[d] = (counts[d] || 0) + 1);
 
-            // Vérifier la Suite (1, 2, 3, 4, 5)
             const isStraight = [1, 2, 3, 4, 5].every(v => counts[v] === 1);
             if (isStraight && diceValues.length === 5) return { score: 1500, isValid: true, unused: [] };
 
-            // Vérifier le Full (3 pareils + 2 pareils)
             let has3 = false; let has2 = false;
             for (let v in counts) {
                 if (counts[v] === 3) has3 = true;
@@ -54,7 +51,6 @@
                 return { score: 1500, isValid: true, unused: [] };
             }
 
-            // Calcul classique
             let score = 0;
             let unused = [];
 
@@ -64,7 +60,7 @@
 
                 if (count >= 3) {
                     let base = (v === 1) ? 1000 : (v === 5 ? 500 : v * 100);
-                    let multiplier = Math.pow(2, count - 3); // Carré = x2, Quinté = x4
+                    let multiplier = Math.pow(2, count - 3);
                     score += base * multiplier;
                 } else {
                     if (v === 1) {
@@ -80,7 +76,6 @@
             return { score, isValid: score > 0 && unused.length === 0, unused };
         };
 
-        // Vérifie s'il est au moins possible de faire des points avec les dés donnés
         const canScore = (diceValues) => {
             if (diceValues.length === 0) return false;
             if (diceValues.includes(1) || diceValues.includes(5)) return true;
@@ -100,7 +95,7 @@
             ],
             turn: 0,
             dice: [
-                { id: 0, val: 1, state: 'idle' }, // states: 'idle', 'selected', 'locked'
+                { id: 0, val: 1, state: 'idle' },
                 { id: 1, val: 2, state: 'idle' },
                 { id: 2, val: 3, state: 'idle' },
                 { id: 3, val: 4, state: 'idle' },
@@ -115,13 +110,11 @@
             const [user, setUser] = useState(null);
             const [gameState, setGameState] = useState(null);
             
-            // On récupère l'ID du joueur depuis la mémoire du navigateur s'il existe
             const [myPlayerId, setMyPlayerId] = useState(() => {
                 const saved = localStorage.getItem('10000_playerId');
                 return saved !== null ? parseInt(saved, 10) : null;
             });
 
-            // Authentification Firebase
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -134,10 +127,9 @@
                 initAuth();
             }, []);
 
-            // Écoute de l'état du jeu en temps réel
             useEffect(() => {
                 if (!user) return;
-                const gameRef = doc(db, 'artifacts', '10000_github_app', 'public', 'data', 'games', 'room_10000');
+                const gameRef = doc(db, 'games', 'room_10000');
                 
                 const unsubscribe = onSnapshot(gameRef, (docSnap) => {
                     if (docSnap.exists()) {
@@ -151,15 +143,14 @@
             }, [user]);
 
             const pushState = async (newState) => {
-                const gameRef = doc(db, 'artifacts', '10000_github_app', 'public', 'data', 'games', 'room_10000');
+                const gameRef = doc(db, 'games', 'room_10000');
                 await setDoc(gameRef, newState);
             };
 
             const logMessage = (state, msg) => {
-                state.logs = [msg, ...state.logs].slice(0, 5); // Garde les 5 derniers messages
+                state.logs = [msg, ...state.logs].slice(0, 5);
             };
 
-            // Le rendu SVG d'un dé (dessine les petits points)
             const renderDieSVG = (val, dotColor) => {
                 const dots = {
                     1: [<circle cx="50" cy="50" r="10" fill={dotColor} key="1"/>],
@@ -179,11 +170,11 @@
             const renderDie = (die) => {
                 let bgClass = "bg-white text-slate-900";
                 let ringClass = "";
-                let dotColor = "#0f172a"; // slate-900
+                let dotColor = "#0f172a";
                 
                 if (die.state === 'locked') {
                     bgClass = "bg-slate-300 opacity-60";
-                    dotColor = "#64748b"; // slate-500
+                    dotColor = "#64748b";
                 } else if (die.state === 'selected') {
                     bgClass = "bg-emerald-400";
                     ringClass = "ring-4 ring-emerald-200";
@@ -210,7 +201,6 @@
                 let state = JSON.parse(JSON.stringify(gameState));
                 let p = state.players[myPlayerId];
                 
-                // Verrouiller les dés sélectionnés et ajouter au score du tour
                 const selectedDice = state.dice.filter(d => d.state === 'selected');
                 if (selectedDice.length > 0) {
                     const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
@@ -219,13 +209,11 @@
                     state.dice.forEach(d => { if (d.state === 'selected') d.state = 'locked'; });
                 }
 
-                // Si tous les dés sont verrouillés, c'est la main chaude (Full repick)
                 if (state.dice.every(d => d.state === 'locked')) {
                     state.dice.forEach(d => d.state = 'idle');
                     logMessage(state, `${p.name} a la main chaude et relance les 5 dés !`);
                 }
 
-                // Lancer les dés libres
                 let rolledValues = [];
                 state.dice.forEach(d => {
                     if (d.state === 'idle') {
@@ -235,7 +223,6 @@
                 });
                 state.rollCount += 1;
 
-                // Vérifier le Chou-blanc
                 if (!canScore(rolledValues)) {
                     if (state.rollCount === 1) {
                         p.coches += 2;
@@ -245,18 +232,16 @@
                         logMessage(state, `💨 Chou-blanc pour ${p.name}. Tour perdu.`);
                     }
 
-                    // Vérifier la sanction de la 3ème coche
                     if (p.coches >= 3) {
                         let oldScore = p.scores[p.scores.length - 1];
                         if (p.scores.length > 1) {
-                            p.scores.pop(); // Redescend au palier précédent
+                            p.scores.pop();
                         }
                         let newScore = p.scores[p.scores.length - 1];
                         logMessage(state, `📉 ${p.name} a pris sa 3ème coche ! Il chute de ${oldScore} à ${newScore} points.`);
-                        p.coches = 0; // Remise à zéro des coches
+                        p.coches = 0;
                     }
 
-                    // Fin du tour
                     state.turnScore = 0;
                     state.rollCount = 0;
                     state.dice.forEach(d => d.state = 'idle');
@@ -283,19 +268,26 @@
                 let state = JSON.parse(JSON.stringify(gameState));
                 let p = state.players[myPlayerId];
 
-                // Ajouter les points sélectionnés en cours
                 const selectedDice = state.dice.filter(d => d.state === 'selected');
+                let scoreAAjouter = 0;
+
                 if (selectedDice.length > 0) {
                     const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
                     if (!isValid) return; 
-                    state.turnScore += score;
+                    scoreAAjouter = score;
                 }
 
-                let totalGain = state.turnScore;
+                let totalGain = state.turnScore + scoreAAjouter;
+
+                // VERIFICATION DE SÉCURITÉ : Impossible de garder un score qui finit par 50
+                if (totalGain % 100 === 50) {
+                    return; 
+                }
+
+                state.turnScore += scoreAAjouter;
                 let currentTotal = p.scores[p.scores.length - 1];
                 let newTotal = currentTotal + totalGain;
 
-                // Règle de l'ouverture (500 pts minimum)
                 if (p.scores.length === 1 && newTotal < 500) {
                     alert("Il faut au moins 500 points pour ouvrir !");
                     return;
@@ -304,7 +296,6 @@
                 p.scores.push(newTotal);
                 logMessage(state, `✅ ${p.name} sécurise et monte à ${newTotal} points.`);
 
-                // Règle de la Collision (Tracer la ligne)
                 let otherPlayerId = myPlayerId === 0 ? 1 : 0;
                 let otherP = state.players[otherPlayerId];
                 let otherTotal = otherP.scores[otherP.scores.length - 1];
@@ -317,12 +308,10 @@
                     logMessage(state, `⚔️ INCROYABLE ! ${p.name} trace la ligne de ${otherP.name} qui retombe à ${otherNewTotal} pts !`);
                 }
 
-                // Gagné ?
                 if (newTotal >= 10000) {
                     logMessage(state, `🏆 ${p.name} a atteint 10 000 points et gagne la partie !`);
                 }
 
-                // Fin de tour normale
                 state.turnScore = 0;
                 state.rollCount = 0;
                 state.dice.forEach(d => d.state = 'idle');
@@ -344,7 +333,7 @@
                 return (
                     <div className="flex flex-col h-screen items-center justify-center bg-slate-900 text-white p-6">
                         <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
-                        <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez le lien à votre adversaire. Choisissez votre place :</p>
+                        <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez ce lien à votre adversaire. Choisissez votre place :</p>
                         
                         <div className="flex gap-6 w-full max-w-md">
                             {[0, 1].map(idx => {
@@ -368,7 +357,7 @@
                             })}
                         </div>
                         <button onClick={handleClearTable} className="mt-12 p-3 text-sm text-red-500/70 hover:text-red-400 bg-red-500/10 rounded-lg">
-                            Vider la table (Forcer la réinitialisation)
+                            Vider la table (Forcer la réinitialisation des places)
                         </button>
                     </div>
                 );
@@ -380,17 +369,23 @@
 
             const selectedDice = gameState.dice.filter(d => d.state === 'selected');
             const { score: currentSelectionScore, isValid: selectionValid } = getScoreDetails(selectedDice.map(d => d.val));
+            
+            // Calcul du score potentiel (points déjà acquis ce tour + sélection en cours)
+            const potentialTurnScore = gameState.turnScore + (selectionValid ? currentSelectionScore : 0);
+
             const canRoll = isMyTurn && (gameState.rollCount === 0 || (selectedDice.length > 0 && selectionValid));
             
+            // On vérifie que le score potentiel est > 0 ET qu'il ne finit PAS par 50
+            const scoreDoesNotEndIn50 = potentialTurnScore % 100 !== 50;
             const canBank = isMyTurn && gameState.rollCount > 0 && 
-                            ((selectionValid && currentSelectionScore > 0) || (gameState.turnScore > 0 && selectedDice.length === 0));
+                            ((selectionValid && currentSelectionScore > 0) || (gameState.turnScore > 0 && selectedDice.length === 0)) &&
+                            scoreDoesNotEndIn50;
 
             return (
                 <div className="flex flex-col h-full bg-slate-900 text-white">
-                    {/* Header / Scores */}
                     <div className="flex justify-between items-center bg-slate-800 p-4 shadow-md z-10 shrink-0">
                         <div className={`flex flex-col ${gameState.turn === otherPlayer.id ? 'opacity-100' : 'opacity-50'}`}>
-                            <span className="text-sm text-slate-400">{otherPlayer.name}</span>
+                            <span className="text-sm text-slate-400">Adversaire</span>
                             <span className="text-2xl font-bold">{otherPlayer.scores[otherPlayer.scores.length - 1]} pts</span>
                             <div className="flex gap-1 mt-1">
                                 {[1, 2].map(i => (
@@ -400,15 +395,15 @@
                         </div>
 
                         <div className="text-center font-bold text-amber-400 tracking-widest text-sm">
-                            {gameState.turnScore + currentSelectionScore > 0 && (
+                            {potentialTurnScore > 0 && (
                                 <div className="bg-slate-900 px-4 py-2 rounded-full border border-slate-700 shadow-inner">
-                                    Tour: +{gameState.turnScore + (selectionValid ? currentSelectionScore : 0)}
+                                    Tour: +{potentialTurnScore}
                                 </div>
                             )}
                         </div>
 
                         <div className={`flex flex-col text-right ${gameState.turn === myPlayerId ? 'opacity-100' : 'opacity-50'}`}>
-                            <span className="text-sm text-emerald-400">Vous ({myPlayer.name})</span>
+                            <span className="text-sm text-emerald-400">Vous (Joueur {myPlayerId + 1})</span>
                             <span className="text-2xl font-bold">{myPlayer.scores[myPlayer.scores.length - 1]} pts</span>
                             <div className="flex gap-1 mt-1 justify-end">
                                 {[1, 2].map(i => (
@@ -418,9 +413,7 @@
                         </div>
                     </div>
 
-                    {/* Plateau de jeu */}
                     <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
-                        {/* Historique */}
                         <div className="absolute top-4 left-4 right-4 h-24 overflow-hidden pointer-events-none opacity-60 text-sm text-center">
                             {gameState.logs.map((log, i) => (
                                 <div key={i} className={`mb-1 ${i === 0 ? 'text-white font-bold' : 'text-slate-400'}`}>
@@ -429,19 +422,16 @@
                             ))}
                         </div>
 
-                        {/* Indication Tour Adversaire Discrète */}
                         {!isMyTurn && (
-                            <div className="text-amber-400 font-bold mb-4 animate-pulse">
-                                Au tour de {otherPlayer.name} de jouer...
+                            <div className="text-amber-400/80 font-bold mb-4 animate-pulse">
+                                L'adversaire réfléchit...
                             </div>
                         )}
 
-                        {/* Les Dés */}
                         <div className="flex flex-wrap gap-4 justify-center mt-6">
                             {gameState.dice.map(renderDie)}
                         </div>
 
-                        {/* Sélection feedback */}
                         <div className="h-8 mt-6">
                             {selectedDice.length > 0 && (
                                 <span className={`px-4 py-1 rounded-full text-sm font-bold ${selectionValid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -450,12 +440,11 @@
                             )}
                         </div>
 
-                        {/* Boutons d'action */}
                         <div className="mt-8 flex gap-4 w-full max-w-sm">
                             <button 
                                 onClick={handleRoll}
                                 disabled={!canRoll}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canRoll ? 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canRoll ? 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
                             >
                                 {gameState.rollCount === 0 ? 'Lancer les dés' : 'Relancer'}
                             </button>
@@ -463,9 +452,10 @@
                             <button 
                                 onClick={handleBank}
                                 disabled={!canBank}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canBank ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_4px_0_0_rgba(16,185,129,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canBank ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_4px_0_0_rgba(16,185,129,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
                             >
-                                Garder
+                                {/* Changement dynamique du texte si ça finit par 50 */}
+                                {isMyTurn && potentialTurnScore > 0 && !scoreDoesNotEndIn50 ? 'Finit par 50 !' : 'Garder'}
                             </button>
                         </div>
                         
@@ -474,7 +464,7 @@
                                 let state = JSON.parse(JSON.stringify(initialGameState));
                                 pushState(state);
                             }} className="hover:text-slate-300">
-                                Recommencer la partie
+                                Réinitialiser la partie
                             </button>
                             <button onClick={() => {
                                 let state = JSON.parse(JSON.stringify(gameState));
