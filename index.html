@@ -12,7 +12,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Babel pour compiler le JSX dans le navigateur -->
+    <!-- Babel pour compiler le JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white overflow-hidden">
@@ -23,15 +23,14 @@
         import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-        // ⚠️ REMPLACE CECI PAR TON CONFIG FIREBASE ⚠️
         const firebaseConfig = {
-  apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
-  authDomain: "project-688816839048633365.firebaseapp.com",
-  projectId: "project-688816839048633365",
-  storageBucket: "project-688816839048633365.firebasestorage.app",
-  messagingSenderId: "57106076475",
-  appId: "1:57106076475:web:82c33baaefade575a55d1e"
-};
+          apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
+          authDomain: "project-688816839048633365.firebaseapp.com",
+          projectId: "project-688816839048633365",
+          storageBucket: "project-688816839048633365.firebasestorage.app",
+          messagingSenderId: "57106076475",
+          appId: "1:57106076475:web:82c33baaefade575a55d1e"
+        };
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
@@ -39,18 +38,15 @@
 
         const { useState, useEffect } = React;
 
-        // Calcule les points d'une sélection de dés et vérifie si elle est valide
         const getScoreDetails = (diceValues) => {
             if (diceValues.length === 0) return { score: 0, isValid: false, unused: [] };
             
             let counts = {};
             diceValues.forEach(d => counts[d] = (counts[d] || 0) + 1);
 
-            // Vérifier la Suite (1, 2, 3, 4, 5)
             const isStraight = [1, 2, 3, 4, 5].every(v => counts[v] === 1);
             if (isStraight && diceValues.length === 5) return { score: 1500, isValid: true, unused: [] };
 
-            // Vérifier le Full (3 pareils + 2 pareils)
             let has3 = false; let has2 = false;
             for (let v in counts) {
                 if (counts[v] === 3) has3 = true;
@@ -60,7 +56,6 @@
                 return { score: 1500, isValid: true, unused: [] };
             }
 
-            // Calcul classique
             let score = 0;
             let unused = [];
 
@@ -70,7 +65,7 @@
 
                 if (count >= 3) {
                     let base = (v === 1) ? 1000 : (v === 5 ? 500 : v * 100);
-                    let multiplier = Math.pow(2, count - 3); // Carré = x2, Quinté = x4
+                    let multiplier = Math.pow(2, count - 3); 
                     score += base * multiplier;
                 } else {
                     if (v === 1) {
@@ -86,7 +81,6 @@
             return { score, isValid: score > 0 && unused.length === 0, unused };
         };
 
-        // Vérifie s'il est au moins possible de faire des points avec les dés donnés
         const canScore = (diceValues) => {
             if (diceValues.length === 0) return false;
             if (diceValues.includes(1) || diceValues.includes(5)) return true;
@@ -97,6 +91,35 @@
                 if (counts[d] >= 3) return true;
             }
             return false;
+        };
+
+        const DieFace = ({ value }) => {
+            const dots = [];
+            const radius = 10;
+            const positions = {
+                center: { cx: 50, cy: 50 },
+                topLeft: { cx: 24, cy: 24 },
+                topRight: { cx: 76, cy: 24 },
+                midLeft: { cx: 24, cy: 50 },
+                midRight: { cx: 76, cy: 50 },
+                botLeft: { cx: 24, cy: 76 },
+                botRight: { cx: 76, cy: 76 },
+            };
+
+            if (value === 1) dots.push(positions.center);
+            else if (value === 2) dots.push(positions.botLeft, positions.topRight);
+            else if (value === 3) dots.push(positions.botLeft, positions.center, positions.topRight);
+            else if (value === 4) dots.push(positions.topLeft, positions.botLeft, positions.topRight, positions.botRight);
+            else if (value === 5) dots.push(positions.topLeft, positions.botLeft, positions.center, positions.topRight, positions.botRight);
+            else if (value === 6) dots.push(positions.topLeft, positions.midLeft, positions.botLeft, positions.topRight, positions.midRight, positions.botRight);
+
+            return (
+                <svg viewBox="0 0 100 100" className="w-full h-full p-2 drop-shadow-sm">
+                    {dots.map((pos, i) => (
+                        <circle key={i} cx={pos.cx} cy={pos.cy} r={radius} fill="currentColor" />
+                    ))}
+                </svg>
+            );
         };
 
         const initialGameState = {
@@ -120,10 +143,13 @@
         function App() {
             const [user, setUser] = useState(null);
             const [gameState, setGameState] = useState(null);
-            const [myPlayerId, setMyPlayerId] = useState(null);
-            const [localError, setLocalError] = useState("");
+            
+            // On récupère l'ID du joueur dans la mémoire du navigateur s'il existe
+            const [myPlayerId, setMyPlayerId] = useState(() => {
+                const saved = localStorage.getItem('10000_playerId');
+                return saved !== null ? parseInt(saved, 10) : null;
+            });
 
-            // Authentification & Connexion Firebase
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -131,16 +157,13 @@
                         setUser(userCred.user);
                     } catch (error) {
                         console.error("Auth error:", error);
-                        setLocalError("Erreur de connexion. Vérifiez la config Firebase et l'Auth Anonyme.");
                     }
                 };
                 initAuth();
             }, []);
 
-            // Ecoute de l'état du jeu
             useEffect(() => {
                 if (!user) return;
-                // Le chemin dans TA base de données
                 const gameRef = doc(db, 'games', 'room_10000');
                 
                 const unsubscribe = onSnapshot(gameRef, (docSnap) => {
@@ -149,7 +172,7 @@
                     } else {
                         setDoc(gameRef, initialGameState);
                     }
-                }, (err) => console.error("Firestore error:", err));
+                });
 
                 return () => unsubscribe();
             }, [user]);
@@ -161,6 +184,28 @@
 
             const logMessage = (state, msg) => {
                 state.logs = [msg, ...state.logs].slice(0, 5);
+            };
+
+            const handleJoin = (idx) => {
+                let state = {...gameState};
+                state.players[idx].joined = true;
+                pushState(state);
+                setMyPlayerId(idx);
+                localStorage.setItem('10000_playerId', idx);
+            };
+
+            const handleClearTable = () => {
+                localStorage.removeItem('10000_playerId');
+                setMyPlayerId(null);
+                pushState(initialGameState);
+            };
+
+            const handleLeaveTable = () => {
+                let state = {...gameState};
+                state.players[myPlayerId].joined = false;
+                pushState(state);
+                localStorage.removeItem('10000_playerId');
+                setMyPlayerId(null);
             };
 
             const handleRoll = () => {
@@ -288,10 +333,9 @@
                 pushState(state);
             };
 
-            if (localError) return <div className="flex h-screen items-center justify-center p-4 text-center">{localError}</div>;
             if (!gameState) return <div className="flex h-screen items-center justify-center text-white bg-slate-900">Chargement de la table...</div>;
 
-            if (myPlayerId === null) {
+            if (myPlayerId === null || !gameState.players[myPlayerId].joined) {
                 return (
                     <div className="flex flex-col h-screen items-center justify-center bg-slate-900 p-6">
                         <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
@@ -303,20 +347,19 @@
                                 return (
                                     <button 
                                         key={idx}
-                                        onClick={() => {
-                                            let state = {...gameState};
-                                            state.players[idx].joined = true;
-                                            pushState(state);
-                                            setMyPlayerId(idx);
-                                        }}
+                                        onClick={() => handleJoin(idx)}
                                         disabled={p.joined}
                                         className={`flex-1 p-6 rounded-xl font-bold text-xl transition-all ${p.joined ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1'}`}
                                     >
-                                        {p.joined ? 'Pris' : `Jouer ${idx + 1}`}
+                                        {p.joined ? 'Place occupée' : `Jouer ${idx + 1}`}
                                     </button>
                                 );
                             })}
                         </div>
+
+                        <button onClick={handleClearTable} className="mt-12 text-sm text-red-500/70 hover:text-red-400 underline underline-offset-4">
+                            Vider la table (Forcer la réinitialisation des places)
+                        </button>
                     </div>
                 );
             }
@@ -395,7 +438,7 @@
                                         className={`w-16 h-16 md:w-20 md:h-20 rounded-xl flex items-center justify-center text-3xl font-black shadow-lg transform transition-all 
                                         ${bgClass} ${isInteractable ? 'cursor-pointer hover:scale-105' : ''}`}
                                     >
-                                        {die.val}
+                                        <DieFace value={die.val} />
                                     </div>
                                 );
                             })}
@@ -427,9 +470,15 @@
                             </button>
                         </div>
                         
-                        <button onClick={resetGame} className="mt-8 text-xs text-slate-500 hover:text-slate-300">
-                            Réinitialiser la partie
-                        </button>
+                        <div className="mt-12 flex gap-6">
+                            <button onClick={resetGame} className="text-xs text-slate-500 hover:text-slate-300">
+                                Remettre les scores à zéro
+                            </button>
+                            <span className="text-slate-700">|</span>
+                            <button onClick={handleLeaveTable} className="text-xs text-slate-500 hover:text-red-400">
+                                Quitter la table
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
