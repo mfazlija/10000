@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Le 10 000</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel pour compiler le JSX dans le navigateur -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white overflow-hidden">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        // ⚠️ REMPLACE CECI PAR TON CONFIG FIREBASE ⚠️
+        const firebaseConfig = {
+            apiKey: "TON_API_KEY",
+            authDomain: "TON_PROJET.firebaseapp.com",
+            projectId: "TON_PROJET",
+            storageBucket: "TON_PROJET.appspot.com",
+            messagingSenderId: "TON_ID",
+            appId: "TON_APP_ID"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const { useState, useEffect } = React;
+
+        // Calcule les points d'une sélection de dés et vérifie si elle est valide
+        const getScoreDetails = (diceValues) => {
+            if (diceValues.length === 0) return { score: 0, isValid: false, unused: [] };
+            
+            let counts = {};
+            diceValues.forEach(d => counts[d] = (counts[d] || 0) + 1);
+
+            // Vérifier la Suite (1, 2, 3, 4, 5)
+            const isStraight = [1, 2, 3, 4, 5].every(v => counts[v] === 1);
+            if (isStraight && diceValues.length === 5) return { score: 1500, isValid: true, unused: [] };
+
+            // Vérifier le Full (3 pareils + 2 pareils)
+            let has3 = false; let has2 = false;
+            for (let v in counts) {
+                if (counts[v] === 3) has3 = true;
+                if (counts[v] === 2) has2 = true;
+            }
+            if (has3 && has2 && diceValues.length === 5) {
+                return { score: 1500, isValid: true, unused: [] };
+            }
+
+            // Calcul classique
+            let score = 0;
+            let unused = [];
+
+            for (let v = 1; v <= 6; v++) {
+                let count = counts[v] || 0;
+                if (count === 0) continue;
+
+                if (count >= 3) {
+                    let base = (v === 1) ? 1000 : (v === 5 ? 500 : v * 100);
+                    let multiplier = Math.pow(2, count - 3); // Carré = x2, Quinté = x4
+                    score += base * multiplier;
+                } else {
+                    if (v === 1) {
+                        score += count * 100;
+                    } else if (v === 5) {
+                        score += count * 50;
+                    } else {
+                        for (let i = 0; i < count; i++) unused.push(v);
+                    }
+                }
+            }
+
+            return { score, isValid: score > 0 && unused.length === 0, unused };
+        };
+
+        // Vérifie s'il est au moins possible de faire des points avec les dés donnés
+        const canScore = (diceValues) => {
+            if (diceValues.length === 0) return false;
+            if (diceValues.includes(1) || diceValues.includes(5)) return true;
+            
+            let counts = {};
+            for (let d of diceValues) {
+                counts[d] = (counts[d] || 0) + 1;
+                if (counts[d] >= 3) return true;
+            }
+            return false;
+        };
+
+        const initialGameState = {
+            players: [
+                { id: 0, name: "Joueur 1", scores: [0], coches: 0, joined: false },
+                { id: 1, name: "Joueur 2", scores: [0], coches: 0, joined: false }
+            ],
+            turn: 0,
+            dice: [
+                { id: 0, val: 1, state: 'idle' },
+                { id: 1, val: 2, state: 'idle' },
+                { id: 2, val: 3, state: 'idle' },
+                { id: 3, val: 4, state: 'idle' },
+                { id: 4, val: 5, state: 'idle' }
+            ],
+            rollCount: 0,
+            turnScore: 0,
+            logs: ["La partie est prête !"]
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [gameState, setGameState] = useState(null);
+            const [myPlayerId, setMyPlayerId] = useState(null);
+            const [localError, setLocalError] = useState("");
+
+            // Authentification & Connexion Firebase
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        const userCred = await signInAnonymously(auth);
+                        setUser(userCred.user);
+                    } catch (error) {
+                        console.error("Auth error:", error);
+                        setLocalError("Erreur de connexion. Vérifiez la config Firebase et l'Auth Anonyme.");
+                    }
+                };
+                initAuth();
+            }, []);
+
+            // Ecoute de l'état du jeu
+            useEffect(() => {
+                if (!user) return;
+                // Le chemin dans TA base de données
+                const gameRef = doc(db, 'games', 'room_10000');
+                
+                const unsubscribe = onSnapshot(gameRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setGameState(docSnap.data());
+                    } else {
+                        setDoc(gameRef, initialGameState);
+                    }
+                }, (err) => console.error("Firestore error:", err));
+
+                return () => unsubscribe();
+            }, [user]);
+
+            const pushState = async (newState) => {
+                const gameRef = doc(db, 'games', 'room_10000');
+                await setDoc(gameRef, newState);
+            };
+
+            const logMessage = (state, msg) => {
+                state.logs = [msg, ...state.logs].slice(0, 5);
+            };
+
+            const handleRoll = () => {
+                if (gameState.turn !== myPlayerId) return;
+
+                let state = JSON.parse(JSON.stringify(gameState));
+                let p = state.players[myPlayerId];
+                
+                const selectedDice = state.dice.filter(d => d.state === 'selected');
+                if (selectedDice.length > 0) {
+                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
+                    if (!isValid) return; 
+                    state.turnScore += score;
+                    state.dice.forEach(d => { if (d.state === 'selected') d.state = 'locked'; });
+                }
+
+                if (state.dice.every(d => d.state === 'locked')) {
+                    state.dice.forEach(d => d.state = 'idle');
+                    logMessage(state, `${p.name} a la main chaude et relance les 5 dés !`);
+                }
+
+                let rolledValues = [];
+                state.dice.forEach(d => {
+                    if (d.state === 'idle') {
+                        d.val = Math.floor(Math.random() * 6) + 1;
+                        rolledValues.push(d.val);
+                    }
+                });
+                state.rollCount += 1;
+
+                if (!canScore(rolledValues)) {
+                    if (state.rollCount === 1) {
+                        p.coches += 2;
+                        logMessage(state, `💥 Aïe ! Double coche pour ${p.name} sur son 1er lancer de ce tour.`);
+                    } else {
+                        p.coches += 1;
+                        logMessage(state, `💨 Chou-blanc pour ${p.name}. Tour perdu.`);
+                    }
+
+                    if (p.coches >= 3) {
+                        let oldScore = p.scores[p.scores.length - 1];
+                        if (p.scores.length > 1) {
+                            p.scores.pop();
+                        }
+                        let newScore = p.scores[p.scores.length - 1];
+                        logMessage(state, `📉 ${p.name} a pris sa 3ème coche ! Il chute de ${oldScore} à ${newScore} points.`);
+                        p.coches = 0; 
+                    }
+
+                    state.turnScore = 0;
+                    state.rollCount = 0;
+                    state.dice.forEach(d => d.state = 'idle');
+                    state.turn = state.turn === 0 ? 1 : 0;
+                }
+
+                pushState(state);
+            };
+
+            const handleToggleDie = (dieId) => {
+                if (gameState.turn !== myPlayerId) return;
+                let state = JSON.parse(JSON.stringify(gameState));
+                let die = state.dice.find(d => d.id === dieId);
+                
+                if (state.rollCount === 0 || die.state === 'locked') return;
+
+                die.state = die.state === 'idle' ? 'selected' : 'idle';
+                pushState(state);
+            };
+
+            const handleBank = () => {
+                if (gameState.turn !== myPlayerId) return;
+
+                let state = JSON.parse(JSON.stringify(gameState));
+                let p = state.players[myPlayerId];
+
+                const selectedDice = state.dice.filter(d => d.state === 'selected');
+                if (selectedDice.length > 0) {
+                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
+                    if (!isValid) return; 
+                    state.turnScore += score;
+                }
+
+                let totalGain = state.turnScore;
+                let currentTotal = p.scores[p.scores.length - 1];
+                let newTotal = currentTotal + totalGain;
+
+                if (p.scores.length === 1 && newTotal < 500) {
+                    alert("Il faut au moins 500 points pour ouvrir !");
+                    return;
+                }
+
+                p.scores.push(newTotal);
+                logMessage(state, `✅ ${p.name} sécurise et monte à ${newTotal} points.`);
+
+                let otherPlayerId = myPlayerId === 0 ? 1 : 0;
+                let otherP = state.players[otherPlayerId];
+                let otherTotal = otherP.scores[otherP.scores.length - 1];
+
+                if (otherTotal === newTotal && newTotal > 0) {
+                    if (otherP.scores.length > 1) {
+                        otherP.scores.pop();
+                    }
+                    let otherNewTotal = otherP.scores[otherP.scores.length - 1];
+                    logMessage(state, `⚔️ INCROYABLE ! ${p.name} trace la ligne de ${otherP.name} qui retombe à ${otherNewTotal} pts !`);
+                }
+
+                if (newTotal >= 10000) {
+                    logMessage(state, `🏆 ${p.name} a atteint 10 000 points et gagne la partie !`);
+                }
+
+                state.turnScore = 0;
+                state.rollCount = 0;
+                state.dice.forEach(d => d.state = 'idle');
+                state.turn = otherPlayerId;
+
+                pushState(state);
+            };
+
+            const resetGame = () => {
+                let state = JSON.parse(JSON.stringify(initialGameState));
+                state.players[0].name = gameState.players[0].name;
+                state.players[1].name = gameState.players[1].name;
+                state.players[0].joined = gameState.players[0].joined;
+                state.players[1].joined = gameState.players[1].joined;
+                pushState(state);
+            };
+
+            if (localError) return <div className="flex h-screen items-center justify-center p-4 text-center">{localError}</div>;
+            if (!gameState) return <div className="flex h-screen items-center justify-center text-white bg-slate-900">Chargement de la table...</div>;
+
+            if (myPlayerId === null) {
+                return (
+                    <div className="flex flex-col h-screen items-center justify-center bg-slate-900 p-6">
+                        <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
+                        <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez ce lien à votre adversaire. Choisissez votre place :</p>
+                        
+                        <div className="flex gap-6 w-full max-w-md">
+                            {[0, 1].map(idx => {
+                                const p = gameState.players[idx];
+                                return (
+                                    <button 
+                                        key={idx}
+                                        onClick={() => {
+                                            let state = {...gameState};
+                                            state.players[idx].joined = true;
+                                            pushState(state);
+                                            setMyPlayerId(idx);
+                                        }}
+                                        disabled={p.joined}
+                                        className={`flex-1 p-6 rounded-xl font-bold text-xl transition-all ${p.joined ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1'}`}
+                                    >
+                                        {p.joined ? 'Pris' : `Jouer ${idx + 1}`}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            }
+
+            const myPlayer = gameState.players[myPlayerId];
+            const otherPlayer = gameState.players[myPlayerId === 0 ? 1 : 0];
+            const isMyTurn = gameState.turn === myPlayerId;
+
+            const selectedDice = gameState.dice.filter(d => d.state === 'selected');
+            const { score: currentSelectionScore, isValid: selectionValid } = getScoreDetails(selectedDice.map(d => d.val));
+            const canRoll = isMyTurn && (gameState.rollCount === 0 || (selectedDice.length > 0 && selectionValid));
+            const canBank = isMyTurn && gameState.rollCount > 0 && 
+                            ((selectionValid && currentSelectionScore > 0) || (gameState.turnScore > 0 && selectedDice.length === 0));
+
+            return (
+                <div className="flex flex-col h-screen overflow-hidden">
+                    <div className="flex justify-between items-center bg-slate-800 p-4 shadow-md z-10">
+                        <div className={`flex flex-col ${gameState.turn === otherPlayer.id ? 'opacity-100' : 'opacity-50'}`}>
+                            <span className="text-sm text-slate-400">{otherPlayer.name}</span>
+                            <span className="text-2xl font-bold">{otherPlayer.scores[otherPlayer.scores.length - 1]} pts</span>
+                            <div className="flex gap-1 mt-1">
+                                {[1, 2].map(i => (
+                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= otherPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="text-center font-bold text-amber-400 tracking-widest text-sm">
+                            {gameState.turnScore + currentSelectionScore > 0 && (
+                                <div className="bg-slate-900 px-4 py-2 rounded-full border border-slate-700 shadow-inner">
+                                    Tour: +{gameState.turnScore + (selectionValid ? currentSelectionScore : 0)}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className={`flex flex-col text-right ${gameState.turn === myPlayerId ? 'opacity-100' : 'opacity-50'}`}>
+                            <span className="text-sm text-emerald-400">Vous ({myPlayer.name})</span>
+                            <span className="text-2xl font-bold">{myPlayer.scores[myPlayer.scores.length - 1]} pts</span>
+                            <div className="flex gap-1 mt-1 justify-end">
+                                {[1, 2].map(i => (
+                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= myPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
+                        <div className="absolute top-4 left-4 right-4 h-24 overflow-hidden pointer-events-none opacity-60 text-sm text-center">
+                            {gameState.logs.map((log, i) => (
+                                <div key={i} className={`mb-1 ${i === 0 ? 'text-white font-bold' : 'text-slate-400'}`}>
+                                    {log}
+                                </div>
+                            ))}
+                        </div>
+
+                        {!isMyTurn && (
+                            <div className="absolute inset-0 bg-slate-900/60 z-20 flex items-center justify-center backdrop-blur-sm">
+                                <div className="bg-slate-800 p-6 rounded-2xl text-center shadow-2xl border border-slate-700">
+                                    <div className="animate-spin text-4xl mb-4">⏳</div>
+                                    <h2 className="text-xl font-bold">Au tour de l'adversaire</h2>
+                                    <p className="text-slate-400">Veuillez patienter...</p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-4 justify-center mt-12">
+                            {gameState.dice.map((die) => {
+                                let bgClass = die.state === 'locked' ? "bg-slate-300 text-slate-500 opacity-60" : 
+                                              die.state === 'selected' ? "bg-emerald-400 text-white ring-4 ring-emerald-200" : "bg-white text-slate-900";
+                                const isInteractable = isMyTurn && gameState.rollCount > 0 && die.state !== 'locked';
+
+                                return (
+                                    <div 
+                                        key={die.id}
+                                        onClick={() => handleToggleDie(die.id)}
+                                        className={`w-16 h-16 md:w-20 md:h-20 rounded-xl flex items-center justify-center text-3xl font-black shadow-lg transform transition-all 
+                                        ${bgClass} ${isInteractable ? 'cursor-pointer hover:scale-105' : ''}`}
+                                    >
+                                        {die.val}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div className="h-8 mt-6">
+                            {selectedDice.length > 0 && (
+                                <span className={`px-4 py-1 rounded-full text-sm font-bold ${selectionValid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    {selectionValid ? `Sélection : +${currentSelectionScore} pts` : 'Sélection invalide'}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="mt-8 flex gap-4 w-full max-w-sm">
+                            <button 
+                                onClick={handleRoll}
+                                disabled={!canRoll}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canRoll ? 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                            >
+                                {gameState.rollCount === 0 ? 'Lancer' : 'Relancer'}
+                            </button>
+                            
+                            <button 
+                                onClick={handleBank}
+                                disabled={!canBank}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canBank ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_4px_0_0_rgba(16,185,129,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                            >
+                                Garder
+                            </button>
+                        </div>
+                        
+                        <button onClick={resetGame} className="mt-8 text-xs text-slate-500 hover:text-slate-300">
+                            Réinitialiser la partie
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
