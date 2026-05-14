@@ -1,99 +1,498 @@
-<!-- ... existing code ... -->
-const initialGameState = {
-    players: [
-        { id: 0, name: "Joueur 1", scores: [0], coches: 0, joined: false },
-        { id: 1, name: "Joueur 2", scores: [0], coches: 0, joined: false }
-    ],
-    turn: 0,
-    dice: [
-        { id: 0, val: 1, state: 'idle' }, // states: 'idle', 'selected', 'locked'
-        { id: 1, val: 2, state: 'idle' },
-        { id: 2, val: 3, state: 'idle' },
-        { id: 3, val: 4, state: 'idle' },
-        { id: 4, val: 5, state: 'idle' }
-    ],
-    rollCount: 0,
-    turnScore: 0,
-    logs: ["La partie est prête !"],
-    isRolling: false
-};
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Le 10 000</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans overflow-hidden h-screen">
+    <div id="root" class="h-full"></div>
 
-export default function App() {
-    const [user, setUser] = useState(null);
-    const [gameState, setGameState] = useState(null);
-    const [myPlayerId, setMyPlayerId] = useState(() => {
-        const saved = localStorage.getItem('10000_playerId');
-        return saved !== null ? parseInt(saved, 10) : null;
-    });
-    const [localError, setLocalError] = useState("");
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // Authentification & Connexion Firebase
-<!-- ... existing code ... -->
-            <div className="flex flex-col h-screen items-center justify-center bg-slate-900 text-white font-sans p-6">
-                <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
-                <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez le lien de cette page à votre adversaire. Choisissez votre place à la table :</p>
+        const { useState, useEffect, useCallback } = React;
+
+        // Ta configuration Firebase personnelle
+        const firebaseConfig = {
+            apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
+            authDomain: "project-688816839048633365.firebaseapp.com",
+            projectId: "project-688816839048633365",
+            storageBucket: "project-688816839048633365.firebasestorage.app",
+            messagingSenderId: "57106076475",
+            appId: "1:57106076475:web:82c33baaefade575a55d1e"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Calcule les points d'une sélection de dés et vérifie si elle est valide
+        const getScoreDetails = (diceValues) => {
+            if (diceValues.length === 0) return { score: 0, isValid: false, unused: [] };
+            
+            let counts = {};
+            diceValues.forEach(d => counts[d] = (counts[d] || 0) + 1);
+
+            // Vérifier la Suite (1, 2, 3, 4, 5)
+            const isStraight = [1, 2, 3, 4, 5].every(v => counts[v] === 1);
+            if (isStraight && diceValues.length === 5) return { score: 1500, isValid: true, unused: [] };
+
+            // Vérifier le Full (3 pareils + 2 pareils)
+            let has3 = false; let has2 = false;
+            for (let v in counts) {
+                if (counts[v] === 3) has3 = true;
+                if (counts[v] === 2) has2 = true;
+            }
+            if (has3 && has2 && diceValues.length === 5) {
+                return { score: 1500, isValid: true, unused: [] };
+            }
+
+            // Calcul classique
+            let score = 0;
+            let unused = [];
+
+            for (let v = 1; v <= 6; v++) {
+                let count = counts[v] || 0;
+                if (count === 0) continue;
+
+                if (count >= 3) {
+                    let base = (v === 1) ? 1000 : (v === 5 ? 500 : v * 100);
+                    let multiplier = Math.pow(2, count - 3); // Carré = x2, Quinté = x4
+                    score += base * multiplier;
+                } else {
+                    if (v === 1) {
+                        score += count * 100;
+                    } else if (v === 5) {
+                        score += count * 50;
+                    } else {
+                        for (let i = 0; i < count; i++) unused.push(v);
+                    }
+                }
+            }
+
+            return { score, isValid: score > 0 && unused.length === 0, unused };
+        };
+
+        // Vérifie s'il est au moins possible de faire des points avec les dés donnés
+        const canScore = (diceValues) => {
+            if (diceValues.length === 0) return false;
+            if (diceValues.includes(1) || diceValues.includes(5)) return true;
+            
+            let counts = {};
+            for (let d of diceValues) {
+                counts[d] = (counts[d] || 0) + 1;
+                if (counts[d] >= 3) return true;
+            }
+            return false;
+        };
+
+        const initialGameState = {
+            players: [
+                { id: 0, name: "Joueur 1", scores: [0], coches: 0, joined: false },
+                { id: 1, name: "Joueur 2", scores: [0], coches: 0, joined: false }
+            ],
+            turn: 0,
+            dice: [
+                { id: 0, val: 1, state: 'idle' }, // states: 'idle', 'selected', 'locked'
+                { id: 1, val: 2, state: 'idle' },
+                { id: 2, val: 3, state: 'idle' },
+                { id: 3, val: 4, state: 'idle' },
+                { id: 4, val: 5, state: 'idle' }
+            ],
+            rollCount: 0,
+            turnScore: 0,
+            logs: ["La partie est prête !"]
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [gameState, setGameState] = useState(null);
+            
+            // On récupère l'ID du joueur depuis la mémoire du navigateur s'il existe
+            const [myPlayerId, setMyPlayerId] = useState(() => {
+                const saved = localStorage.getItem('10000_playerId');
+                return saved !== null ? parseInt(saved, 10) : null;
+            });
+
+            // Authentification Firebase
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        const userCred = await signInAnonymously(auth);
+                        setUser(userCred.user);
+                    } catch (error) {
+                        console.error("Auth error:", error);
+                    }
+                };
+                initAuth();
+            }, []);
+
+            // Écoute de l'état du jeu en temps réel
+            useEffect(() => {
+                if (!user) return;
+                const gameRef = doc(db, 'artifacts', '10000_github_app', 'public', 'data', 'games', 'room_10000');
                 
-                <div className="flex gap-6 w-full max-w-md">
-                    {[0, 1].map(idx => {
-                        const p = gameState.players[idx];
-                        return (
-                            <button 
-                                key={idx}
-                                onClick={() => {
-                                    let state = {...gameState};
-                                    state.players[idx].joined = true;
-                                    pushState(state);
-                                    localStorage.setItem('10000_playerId', idx);
-                                    setMyPlayerId(idx);
-                                }}
-                                disabled={p.joined}
-                                className={`flex-1 p-6 rounded-xl font-bold text-xl transition-all ${p.joined ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1'}`}
-                            >
-                                {p.joined ? 'Place occupée' : `Jouer ${idx + 1}`}
-                            </button>
-                        );
-                    })}
-                </div>
+                const unsubscribe = onSnapshot(gameRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setGameState(docSnap.data());
+                    } else {
+                        setDoc(gameRef, initialGameState);
+                    }
+                }, (err) => console.error("Firestore error:", err));
 
-                <button onClick={handleClearTable} className="mt-12 text-sm text-red-500/70 hover:text-red-400 underline underline-offset-4">
-                    Vider la table (Forcer la réinitialisation des places)
-                </button>
-            </div>
-        );
-    }
+                return () => unsubscribe();
+            }, [user]);
 
-    const myPlayer = gameState.players[myPlayerId];
-<!-- ... existing code ... -->
-            {/* Plateau de jeu */}
-            <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
+            const pushState = async (newState) => {
+                const gameRef = doc(db, 'artifacts', '10000_github_app', 'public', 'data', 'games', 'room_10000');
+                await setDoc(gameRef, newState);
+            };
+
+            const logMessage = (state, msg) => {
+                state.logs = [msg, ...state.logs].slice(0, 5); // Garde les 5 derniers messages
+            };
+
+            // Le rendu SVG d'un dé (dessine les petits points)
+            const renderDieSVG = (val, dotColor) => {
+                const dots = {
+                    1: [<circle cx="50" cy="50" r="10" fill={dotColor} key="1"/>],
+                    2: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="2"/>],
+                    3: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="50" cy="50" r="10" fill={dotColor} key="2"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="3"/>],
+                    4: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="25" r="10" fill={dotColor} key="2"/>, <circle cx="25" cy="75" r="10" fill={dotColor} key="3"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="4"/>],
+                    5: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="25" r="10" fill={dotColor} key="2"/>, <circle cx="50" cy="50" r="10" fill={dotColor} key="3"/>, <circle cx="25" cy="75" r="10" fill={dotColor} key="4"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="5"/>],
+                    6: [<circle cx="25" cy="20" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="20" r="10" fill={dotColor} key="2"/>, <circle cx="25" cy="50" r="10" fill={dotColor} key="3"/>, <circle cx="75" cy="50" r="10" fill={dotColor} key="4"/>, <circle cx="25" cy="80" r="10" fill={dotColor} key="5"/>, <circle cx="75" cy="80" r="10" fill={dotColor} key="6"/>],
+                };
+                return (
+                    <svg viewBox="0 0 100 100" className="w-full h-full p-2 drop-shadow-sm">
+                        {dots[val] || dots[1]}
+                    </svg>
+                );
+            };
+
+            const renderDie = (die) => {
+                let bgClass = "bg-white text-slate-900";
+                let ringClass = "";
+                let dotColor = "#0f172a"; // slate-900
                 
-                {/* Historique / Logs */}
-                <div className="absolute top-4 left-4 right-4 h-24 overflow-hidden pointer-events-none opacity-60 text-sm text-center">
-                    {gameState.logs.map((log, i) => (
-                        <div key={i} className={`mb-1 ${i === 0 ? 'text-white font-bold' : 'text-slate-400'}`}>
-                            {log}
-                        </div>
-                    ))}
-                </div>
+                if (die.state === 'locked') {
+                    bgClass = "bg-slate-300 opacity-60";
+                    dotColor = "#64748b"; // slate-500
+                } else if (die.state === 'selected') {
+                    bgClass = "bg-emerald-400";
+                    ringClass = "ring-4 ring-emerald-200";
+                    dotColor = "#ffffff";
+                }
 
-                {!isMyTurn && (
-                    <div className="text-amber-400 font-bold mb-4 animate-pulse">
-                        Au tour de {otherPlayer.name} de jouer...
+                const isInteractable = isMyTurn && gameState.rollCount > 0 && die.state !== 'locked';
+
+                return (
+                    <div 
+                        key={die.id}
+                        onClick={() => handleToggleDie(die.id)}
+                        className={`w-16 h-16 md:w-20 md:h-20 rounded-xl flex items-center justify-center shadow-lg transform transition-all 
+                        ${bgClass} ${ringClass} ${isInteractable ? 'cursor-pointer hover:scale-105' : ''}`}
+                    >
+                        {renderDieSVG(die.val, dotColor)}
                     </div>
-                )}
+                );
+            };
 
-                {/* Les Dés */}
-                <div className="flex flex-wrap gap-4 justify-center mt-6">
-                    {gameState.dice.map(renderDie)}
+            const handleRoll = () => {
+                if (gameState.turn !== myPlayerId) return;
+
+                let state = JSON.parse(JSON.stringify(gameState));
+                let p = state.players[myPlayerId];
+                
+                // Verrouiller les dés sélectionnés et ajouter au score du tour
+                const selectedDice = state.dice.filter(d => d.state === 'selected');
+                if (selectedDice.length > 0) {
+                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
+                    if (!isValid) return; 
+                    state.turnScore += score;
+                    state.dice.forEach(d => { if (d.state === 'selected') d.state = 'locked'; });
+                }
+
+                // Si tous les dés sont verrouillés, c'est la main chaude (Full repick)
+                if (state.dice.every(d => d.state === 'locked')) {
+                    state.dice.forEach(d => d.state = 'idle');
+                    logMessage(state, `${p.name} a la main chaude et relance les 5 dés !`);
+                }
+
+                // Lancer les dés libres
+                let rolledValues = [];
+                state.dice.forEach(d => {
+                    if (d.state === 'idle') {
+                        d.val = Math.floor(Math.random() * 6) + 1;
+                        rolledValues.push(d.val);
+                    }
+                });
+                state.rollCount += 1;
+
+                // Vérifier le Chou-blanc
+                if (!canScore(rolledValues)) {
+                    if (state.rollCount === 1) {
+                        p.coches += 2;
+                        logMessage(state, `💥 Aïe ! Double coche pour ${p.name} sur son 1er lancer du tour.`);
+                    } else {
+                        p.coches += 1;
+                        logMessage(state, `💨 Chou-blanc pour ${p.name}. Tour perdu.`);
+                    }
+
+                    // Vérifier la sanction de la 3ème coche
+                    if (p.coches >= 3) {
+                        let oldScore = p.scores[p.scores.length - 1];
+                        if (p.scores.length > 1) {
+                            p.scores.pop(); // Redescend au palier précédent
+                        }
+                        let newScore = p.scores[p.scores.length - 1];
+                        logMessage(state, `📉 ${p.name} a pris sa 3ème coche ! Il chute de ${oldScore} à ${newScore} points.`);
+                        p.coches = 0; // Remise à zéro des coches
+                    }
+
+                    // Fin du tour
+                    state.turnScore = 0;
+                    state.rollCount = 0;
+                    state.dice.forEach(d => d.state = 'idle');
+                    state.turn = state.turn === 0 ? 1 : 0;
+                }
+
+                pushState(state);
+            };
+
+            const handleToggleDie = (dieId) => {
+                if (gameState.turn !== myPlayerId) return;
+                let state = JSON.parse(JSON.stringify(gameState));
+                let die = state.dice.find(d => d.id === dieId);
+                
+                if (state.rollCount === 0 || die.state === 'locked') return;
+
+                die.state = die.state === 'idle' ? 'selected' : 'idle';
+                pushState(state);
+            };
+
+            const handleBank = () => {
+                if (gameState.turn !== myPlayerId) return;
+
+                let state = JSON.parse(JSON.stringify(gameState));
+                let p = state.players[myPlayerId];
+
+                // Ajouter les points sélectionnés en cours
+                const selectedDice = state.dice.filter(d => d.state === 'selected');
+                if (selectedDice.length > 0) {
+                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
+                    if (!isValid) return; 
+                    state.turnScore += score;
+                }
+
+                let totalGain = state.turnScore;
+                let currentTotal = p.scores[p.scores.length - 1];
+                let newTotal = currentTotal + totalGain;
+
+                // Règle de l'ouverture (500 pts minimum)
+                if (p.scores.length === 1 && newTotal < 500) {
+                    alert("Il faut au moins 500 points pour ouvrir !");
+                    return;
+                }
+
+                p.scores.push(newTotal);
+                logMessage(state, `✅ ${p.name} sécurise et monte à ${newTotal} points.`);
+
+                // Règle de la Collision (Tracer la ligne)
+                let otherPlayerId = myPlayerId === 0 ? 1 : 0;
+                let otherP = state.players[otherPlayerId];
+                let otherTotal = otherP.scores[otherP.scores.length - 1];
+
+                if (otherTotal === newTotal && newTotal > 0) {
+                    if (otherP.scores.length > 1) {
+                        otherP.scores.pop();
+                    }
+                    let otherNewTotal = otherP.scores[otherP.scores.length - 1];
+                    logMessage(state, `⚔️ INCROYABLE ! ${p.name} trace la ligne de ${otherP.name} qui retombe à ${otherNewTotal} pts !`);
+                }
+
+                // Gagné ?
+                if (newTotal >= 10000) {
+                    logMessage(state, `🏆 ${p.name} a atteint 10 000 points et gagne la partie !`);
+                }
+
+                // Fin de tour normale
+                state.turnScore = 0;
+                state.rollCount = 0;
+                state.dice.forEach(d => d.state = 'idle');
+                state.turn = otherPlayerId;
+
+                pushState(state);
+            };
+
+            const handleClearTable = () => {
+                let state = JSON.parse(JSON.stringify(initialGameState));
+                pushState(state);
+                localStorage.removeItem('10000_playerId');
+                setMyPlayerId(null);
+            };
+
+            if (!gameState) return <div className="flex h-screen items-center justify-center text-white bg-slate-900">Chargement...</div>;
+
+            if (myPlayerId === null) {
+                return (
+                    <div className="flex flex-col h-screen items-center justify-center bg-slate-900 text-white p-6">
+                        <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
+                        <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez le lien à votre adversaire. Choisissez votre place :</p>
+                        
+                        <div className="flex gap-6 w-full max-w-md">
+                            {[0, 1].map(idx => {
+                                const p = gameState.players[idx];
+                                return (
+                                    <button 
+                                        key={idx}
+                                        onClick={() => {
+                                            let state = JSON.parse(JSON.stringify(gameState));
+                                            state.players[idx].joined = true;
+                                            pushState(state);
+                                            localStorage.setItem('10000_playerId', idx);
+                                            setMyPlayerId(idx);
+                                        }}
+                                        disabled={p.joined}
+                                        className={`flex-1 p-6 rounded-xl font-bold text-xl transition-all ${p.joined ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1'}`}
+                                    >
+                                        {p.joined ? 'Pris' : `Jouer ${idx + 1}`}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <button onClick={handleClearTable} className="mt-12 p-3 text-sm text-red-500/70 hover:text-red-400 bg-red-500/10 rounded-lg">
+                            Vider la table (Forcer la réinitialisation)
+                        </button>
+                    </div>
+                );
+            }
+
+            const myPlayer = gameState.players[myPlayerId];
+            const otherPlayer = gameState.players[myPlayerId === 0 ? 1 : 0];
+            const isMyTurn = gameState.turn === myPlayerId;
+
+            const selectedDice = gameState.dice.filter(d => d.state === 'selected');
+            const { score: currentSelectionScore, isValid: selectionValid } = getScoreDetails(selectedDice.map(d => d.val));
+            const canRoll = isMyTurn && (gameState.rollCount === 0 || (selectedDice.length > 0 && selectionValid));
+            
+            const canBank = isMyTurn && gameState.rollCount > 0 && 
+                            ((selectionValid && currentSelectionScore > 0) || (gameState.turnScore > 0 && selectedDice.length === 0));
+
+            return (
+                <div className="flex flex-col h-full bg-slate-900 text-white">
+                    {/* Header / Scores */}
+                    <div className="flex justify-between items-center bg-slate-800 p-4 shadow-md z-10 shrink-0">
+                        <div className={`flex flex-col ${gameState.turn === otherPlayer.id ? 'opacity-100' : 'opacity-50'}`}>
+                            <span className="text-sm text-slate-400">{otherPlayer.name}</span>
+                            <span className="text-2xl font-bold">{otherPlayer.scores[otherPlayer.scores.length - 1]} pts</span>
+                            <div className="flex gap-1 mt-1">
+                                {[1, 2].map(i => (
+                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= otherPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="text-center font-bold text-amber-400 tracking-widest text-sm">
+                            {gameState.turnScore + currentSelectionScore > 0 && (
+                                <div className="bg-slate-900 px-4 py-2 rounded-full border border-slate-700 shadow-inner">
+                                    Tour: +{gameState.turnScore + (selectionValid ? currentSelectionScore : 0)}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className={`flex flex-col text-right ${gameState.turn === myPlayerId ? 'opacity-100' : 'opacity-50'}`}>
+                            <span className="text-sm text-emerald-400">Vous ({myPlayer.name})</span>
+                            <span className="text-2xl font-bold">{myPlayer.scores[myPlayer.scores.length - 1]} pts</span>
+                            <div className="flex gap-1 mt-1 justify-end">
+                                {[1, 2].map(i => (
+                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= myPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Plateau de jeu */}
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
+                        {/* Historique */}
+                        <div className="absolute top-4 left-4 right-4 h-24 overflow-hidden pointer-events-none opacity-60 text-sm text-center">
+                            {gameState.logs.map((log, i) => (
+                                <div key={i} className={`mb-1 ${i === 0 ? 'text-white font-bold' : 'text-slate-400'}`}>
+                                    {log}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Indication Tour Adversaire Discrète */}
+                        {!isMyTurn && (
+                            <div className="text-amber-400 font-bold mb-4 animate-pulse">
+                                Au tour de {otherPlayer.name} de jouer...
+                            </div>
+                        )}
+
+                        {/* Les Dés */}
+                        <div className="flex flex-wrap gap-4 justify-center mt-6">
+                            {gameState.dice.map(renderDie)}
+                        </div>
+
+                        {/* Sélection feedback */}
+                        <div className="h-8 mt-6">
+                            {selectedDice.length > 0 && (
+                                <span className={`px-4 py-1 rounded-full text-sm font-bold ${selectionValid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    {selectionValid ? `Sélection : +${currentSelectionScore} pts` : 'Sélection invalide'}
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Boutons d'action */}
+                        <div className="mt-8 flex gap-4 w-full max-w-sm">
+                            <button 
+                                onClick={handleRoll}
+                                disabled={!canRoll}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canRoll ? 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                            >
+                                {gameState.rollCount === 0 ? 'Lancer les dés' : 'Relancer'}
+                            </button>
+                            
+                            <button 
+                                onClick={handleBank}
+                                disabled={!canBank}
+                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canBank ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_4px_0_0_rgba(16,185,129,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500'}`}
+                            >
+                                Garder
+                            </button>
+                        </div>
+                        
+                        <div className="mt-12 flex gap-6 text-xs text-slate-500">
+                            <button onClick={() => {
+                                let state = JSON.parse(JSON.stringify(initialGameState));
+                                pushState(state);
+                            }} className="hover:text-slate-300">
+                                Recommencer la partie
+                            </button>
+                            <button onClick={() => {
+                                let state = JSON.parse(JSON.stringify(gameState));
+                                state.players[myPlayerId].joined = false;
+                                pushState(state);
+                                localStorage.removeItem('10000_playerId');
+                                setMyPlayerId(null);
+                            }} className="hover:text-slate-300">
+                                Quitter la table
+                            </button>
+                        </div>
+                    </div>
                 </div>
+            );
+        }
 
-                {/* Sélection feedback */}
-                <div className="h-8 mt-6">
-<!-- ... existing code ... -->
-```
-
-**Ce qui a changé avec ces modifications :**
-1. Ton navigateur se souvient de ta chaise (`localStorage.setItem` et la lecture dans le `useState`). Si tu fais F5, tu restes "Jouer 1".
-2. Le gros encadré gris bloquant pour le spectateur a été supprimé. À la place, tu as juste un petit texte jaune clignotant *"Au tour de Joueur 2 de jouer..."* au-dessus des dés. Tu pourras voir les dés bouger en direct !
-
-Pousse ça sur ton GitHub, demandez à Vic de bien rafraîchir sa page pour vider le cache, et ça devrait être parfait ! Dis-moi comment se passe la prochaine partie !
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
