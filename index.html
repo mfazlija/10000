@@ -107,7 +107,7 @@
                                         currentTurnScore: 0,
                                         rollCount: 0,
                                         message: "La partie est prête !",
-                                        bustedPending: null // Nouveau statut pour mettre le jeu en attente de validation
+                                        bustedPending: null
                                     }).catch(e => {
                                         setErrorMsg("Erreur d'écriture de la table : " + e.message);
                                         setLoading(false);
@@ -224,10 +224,28 @@
                         newHistory.pop();
                         newScore = newHistory.length > 0 ? newHistory[newHistory.length - 1] : 0;
                         if (newHistory.length === 0) newHistory = [0];
-            const toggleDice = (index) => {
-                const newDices = [...gameState.dices];
-                newDices[index].selected = !newDices[index].selected;
-                updateGame({ dices: newDices });
+                        currentStrikes = 0;
+                        msg = "3ème coche ! Retour au score précédent.";
+                    }
+
+                    // Affiche la croix rouge
+                    newDices.forEach(d => { d.busted = true; d.selected = false; });
+
+                    updateGame({
+                        dices: newDices,
+                        rollCount: gameState.rollCount + 1,
+                        message: msg,
+                        bustedPending: {
+                            turn: gameState.turn === 'p1' ? 'p2' : 'p1',
+                            players: {
+                                ...gameState.players,
+                                [gameState.turn]: { ...gameState.players[gameState.turn], score: newScore, history: newHistory, strikes: currentStrikes }
+                            }
+                        }
+                    });
+                } else {
+                    updateGame({ dices: newDices, rollCount: gameState.rollCount + 1, message: "Points détectés ! Relancez ou Gardez." });
+                }
             };
 
             const tradeFivesForOne = () => {
@@ -251,7 +269,7 @@
 
             const calculateSelection = () => {
                 const selected = gameState.dices.filter(d => d.selected);
-                if (selected.length === 0) return { valid: false, score: 0 };
+                if (selected.length === 0) return { valid: false, score: 0, isFull: false, isStraight: false };
 
                 const counts = {};
                 selected.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
@@ -259,12 +277,12 @@
                 if (selected.length === 5) {
                     const values = Object.values(counts);
                     if (values.includes(3) && values.includes(2)) {
-                        return { valid: true, score: 1500, isFull: true };
+                        return { valid: true, score: 1500, isFull: true, isStraight: false };
                     }
                     if (values.length === 5) {
                         const sorted = Object.keys(counts).sort().join('');
                         if (sorted === '12345' || sorted === '23456') {
-                            return { valid: true, score: 1500, isStraight: true };
+                            return { valid: true, score: 1500, isFull: false, isStraight: true };
                         }
                     }
                 }
@@ -280,7 +298,7 @@
                     else if (val === 5) score += count * 50;
                     else valid = false;
                 }
-                return { valid, score };
+                return { valid, score, isFull: false, isStraight: false };
             };
 
             const saveSelection = () => {
@@ -341,7 +359,6 @@
                 const otherPlayerId = gameState.turn === 'p1' ? 'p2' : 'p1';
                 const otherPlayer = gameState.players[otherPlayerId];
 
-                // Si c'est une ouverture ratée, on déclenche aussi l'attente avec la croix rouge
                 if (currentPlayer.score === 0 && totalTurnScore < 500) {
                     const newDices = gameState.dices.map(d => ({...d, busted: true, selected: false}));
                     updateGame({ 
@@ -377,7 +394,6 @@
                 });
             };
 
-            // Fonction pour passer le tour manuellement après avoir vu l'échec
             const acknowledgeBust = () => {
                 updateGame({
                     players: gameState.bustedPending.players,
@@ -428,7 +444,6 @@
                 );
             }
 
-            // On vérifie si c'est encore à mon tour SAUF si le jeu attend la validation d'un chou blanc de l'autre joueur
             const isMyTurn = gameState.turn === myPlayerId;
             const { valid, score, isFull, isStraight } = calculateSelection();
             const totalPending = gameState.currentTurnScore + (valid ? score : 0);
