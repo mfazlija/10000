@@ -4,26 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jeu du 10 000</title>
+    
+    <!-- Tailwind et Icones -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- Chargement sécurisé de Firebase en module natif -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-
-        // On expose les outils Firebase au jeu de manière propre
-        window.firebaseDeps = {
-            initializeApp, getFirestore, doc, onSnapshot, setDoc, getAuth, signInAnonymously, onAuthStateChanged
-        };
-    </script>
+    <!-- React -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel v7 (Mise à jour majeure pour éviter l'écran bleu) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase (Version "Compat", la plus stable pour un seul fichier HTML) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 </head>
 <body class="bg-slate-900 text-slate-100">
+
+    <!-- Anti-Écran Bleu : S'affiche uniquement si le code plante totalement -->
+    <div id="fallback-error" class="hidden text-center p-8 mt-10 text-red-400 font-mono bg-slate-800 rounded-xl max-w-lg mx-auto border border-red-500 shadow-xl">
+        <i class="fas fa-bug text-4xl mb-4"></i>
+        <h2 class="text-xl font-bold mb-2">Erreur système fatale</h2>
+        <p id="fallback-error-msg" class="text-sm text-slate-300 break-words bg-slate-900 p-4 rounded"></p>
+        <p class="mt-4 text-xs text-slate-500">Le jeu n'a pas pu démarrer. Copie l'erreur ci-dessus à l'IA.</p>
+    </div>
+
     <div id="root"></div>
+
+    <script>
+        // Détecteur de crash global
+        window.addEventListener('error', function(e) {
+            document.getElementById('fallback-error').classList.remove('hidden');
+            document.getElementById('fallback-error-msg').innerText = e.message || "Erreur inconnue";
+        });
+    </script>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
@@ -60,68 +76,56 @@
                 let unsubscribeDb = () => {};
                 let unsubscribeAuth = () => {};
 
-                const startFirebase = async () => {
-                    // On attend que Firebase soit chargé par le navigateur
-                    if (!window.firebaseDeps) {
-                        setTimeout(startFirebase, 50);
-                        return;
+                try {
+                    // Initialisation sécurisée (Compatible avec le chargement direct)
+                    if (!firebase.apps.length) {
+                        firebase.initializeApp(firebaseConfig);
                     }
+                    const db = firebase.firestore();
+                    const auth = firebase.auth();
 
-                    try {
-                        const { initializeApp, getFirestore, doc, onSnapshot, setDoc, getAuth, signInAnonymously, onAuthStateChanged } = window.firebaseDeps;
-                        
-                        const app = initializeApp(firebaseConfig);
-                        const db = getFirestore(app);
-                        const auth = getAuth(app);
-                        
-                        window.fbDb = db;
-                        window.fbDoc = doc;
-                        window.fbSetDoc = setDoc;
-
-                        await signInAnonymously(auth);
-
-                        unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-                            if (user) {
-                                const docRef = doc(db, "games", "shared_room");
-                                unsubscribeDb = onSnapshot(docRef, 
-                                    (docSnap) => {
-                                        if (docSnap.exists()) {
-                                            setGameState(docSnap.data());
-                                            setLoading(false);
-                                        } else {
-                                            setDoc(docRef, {
-                                                players: {
-                                                    p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
-                                                    p2: { name: "Joueur 2", score: 0, history: [0], active: false, strikes: 0 }
-                                                },
-                                                turn: 'p1',
-                                                dices: [],
-                                                savedDices: [],
-                                                currentTurnScore: 0,
-                                                rollCount: 0,
-                                                message: "La partie est prête !"
-                                            }).catch(e => {
-                                                setErrorMsg("Erreur d'écriture : " + e.message);
-                                                setLoading(false);
-                                            });
-                                        }
-                                    }, 
-                                    (error) => {
-                                        console.error("Erreur Firestore :", error);
-                                        setErrorMsg(error.message);
-                                        setLoading(false);
-                                    }
-                                );
-                            }
-                        });
-                    } catch (error) {
-                        console.error("Erreur technique :", error);
-                        setErrorMsg("Erreur système : " + error.message);
+                    auth.signInAnonymously().catch(error => {
+                        setErrorMsg("Erreur d'authentification : " + error.message);
                         setLoading(false);
-                    }
-                };
+                    });
 
-                startFirebase();
+                    unsubscribeAuth = auth.onAuthStateChanged((user) => {
+                        if (user) {
+                            const docRef = db.collection("games").doc("shared_room");
+                            unsubscribeDb = docRef.onSnapshot((docSnap) => {
+                                if (docSnap.exists) {
+                                    setGameState(docSnap.data());
+                                    setLoading(false);
+                                } else {
+                                    // Création de la table de jeu au premier lancement
+                                    docRef.set({
+                                        players: {
+                                            p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
+                                            p2: { name: "Joueur 2", score: 0, history: [0], active: false, strikes: 0 }
+                                        },
+                                        turn: 'p1',
+                                        dices: [],
+                                        savedDices: [],
+                                        currentTurnScore: 0,
+                                        rollCount: 0,
+                                        message: "La partie est prête !"
+                                    }).catch(e => {
+                                        setErrorMsg("Erreur d'écriture de la table : " + e.message);
+                                        setLoading(false);
+                                    });
+                                }
+                            }, (error) => {
+                                console.error("Erreur Firestore :", error);
+                                setErrorMsg("Erreur Firebase : " + error.message);
+                                setLoading(false);
+                            });
+                        }
+                    });
+
+                } catch (error) {
+                    setErrorMsg("Erreur d'initialisation : " + error.message);
+                    setLoading(false);
+                }
 
                 return () => {
                     unsubscribeDb();
@@ -130,10 +134,9 @@
             }, []);
 
             const updateGame = async (newState) => {
-                if (!window.fbDb) return;
                 try {
-                    const docRef = window.fbDoc(window.fbDb, "games", "shared_room");
-                    await window.fbSetDoc(docRef, { ...gameState, ...newState });
+                    const db = firebase.firestore();
+                    await db.collection("games").doc("shared_room").set({ ...gameState, ...newState });
                 } catch (error) {
                     console.error("Erreur de mise à jour:", error);
                 }
@@ -300,13 +303,9 @@
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-6 text-center">
                         <i className="fas fa-exclamation-triangle text-red-500 text-5xl mb-4"></i>
-                        <h1 className="text-2xl font-bold text-red-400 mb-2">Google Bloque l'Accès</h1>
+                        <h1 className="text-2xl font-bold text-red-400 mb-2">Erreur</h1>
                         <p className="text-slate-300 max-w-md bg-slate-800 p-4 rounded mb-6 font-mono text-sm break-words border border-slate-700 shadow-inner">
                             {errorMsg}
-                        </p>
-                        <p className="text-slate-400 max-w-lg mb-6">
-                            Si le message ci-dessus contient <strong>"permission"</strong> ou <strong>"Missing or insufficient"</strong>, c'est la restriction Google Cloud. <br/>
-                            <br/>💡 <strong>Astuce :</strong> Retourne sur Google Cloud, sélectionne <strong>"Aucun"</strong> dans les restrictions, sauvegarde et rafraîchis la page !
                         </p>
                     </div>
                 );
@@ -332,7 +331,7 @@
                                 {gameState.players.p2.active ? 'Pris' : 'Jouer 2'}
                             </button>
                         </div>
-                        <button onClick={resetTable} className="mt-16 text-red-500 text-sm underline hover:text-red-400">Vider la table (Forcer la réinitialisation des places)</button>
+                        <button onClick={resetTable} className="mt-16 text-red-500 text-sm underline hover:text-red-400">Vider la table (Forcer la réinitialisation)</button>
                     </div>
                 );
             }
