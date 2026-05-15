@@ -258,11 +258,62 @@
             const saveSelection = () => {
                 const { score } = calculateSelection();
                 const newSaved = [...gameState.savedDices, ...gameState.dices.filter(d => d.selected)];
+                const newTurnScore = gameState.currentTurnScore + score;
                 
                 if (newSaved.length === 5) {
-                    updateGame({ savedDices: [], dices: [], currentTurnScore: gameState.currentTurnScore + score, message: "Main pleine ! Relancez 5 dés." });
+                    updateGame({ savedDices: [], dices: [], currentTurnScore: newTurnScore, message: "Main pleine ! Relancez 5 dés." });
                 } else {
-                    updateGame({ savedDices: newSaved, dices: gameState.dices.filter(d => !d.selected), currentTurnScore: gameState.currentTurnScore + score, message: "Relancez ou Gardez vos points." });
+                    // C'EST ICI LA CORRECTION : On lance immédiatement les dés restants !
+                    const dicesToRoll = 5 - newSaved.length;
+                    let newDices = [];
+                    for (let i = 0; i < dicesToRoll; i++) {
+                        newDices.push({ id: Math.random(), value: Math.floor(Math.random() * 6) + 1, selected: false });
+                    }
+
+                    const counts = {};
+                    newDices.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
+                    
+                    let hasPoints = false;
+                    if (counts[1] || counts[5]) hasPoints = true;
+                    Object.values(counts).forEach(count => { if (count >= 3) hasPoints = true; });
+
+                    if (!hasPoints) {
+                        // CHOU-BLANC SUR LA RELANCE !
+                        let currentStrikes = gameState.players[gameState.turn].strikes + 1;
+                        let newScore = gameState.players[gameState.turn].score;
+                        let newHistory = [...gameState.players[gameState.turn].history];
+                        let msg = `Chou-blanc ! Coche ajoutée. (${currentStrikes}/3)`;
+
+                        if (currentStrikes >= 3) {
+                            newHistory.pop();
+                            newScore = newHistory.length > 0 ? newHistory[newHistory.length - 1] : 0;
+                            if (newHistory.length === 0) newHistory = [0];
+                            currentStrikes = 0;
+                            msg = "3ème coche ! Retour au score précédent.";
+                        }
+
+                        updateGame({
+                            players: {
+                                ...gameState.players,
+                                [gameState.turn]: { ...gameState.players[gameState.turn], score: newScore, history: newHistory, strikes: currentStrikes }
+                            },
+                            turn: gameState.turn === 'p1' ? 'p2' : 'p1',
+                            dices: [],
+                            savedDices: [],
+                            currentTurnScore: 0,
+                            rollCount: 0,
+                            message: msg
+                        });
+                    } else {
+                        // ON A DES POINTS, ON AFFICHE LE NOUVEAU LANCER
+                        updateGame({ 
+                            savedDices: newSaved, 
+                            dices: newDices, 
+                            currentTurnScore: newTurnScore, 
+                            rollCount: gameState.rollCount + 1, 
+                            message: "Sélectionnez les dés à garder." 
+                        });
+                    }
                 }
             };
 
