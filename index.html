@@ -234,10 +234,19 @@
                 const counts = {};
                 selected.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
                 
-                if (gameState.rollCount === 1 && selected.length === 5) {
+                // Correction : Le Full et la Suite sont valides même après une "Main pleine"
+                if (selected.length === 5) {
                     const values = Object.values(counts);
+                    // Règle du Full (3 pareils + 2 pareils)
                     if (values.includes(3) && values.includes(2)) {
                         return { valid: true, score: 1500, isFull: true };
+                    }
+                    // Règle de la Suite (1-2-3-4-5 ou 2-3-4-5-6)
+                    if (values.length === 5) {
+                        const sorted = Object.keys(counts).sort().join('');
+                        if (sorted === '12345' || sorted === '23456') {
+                            return { valid: true, score: 1500, isStraight: true };
+                        }
                     }
                 }
 
