@@ -77,7 +77,6 @@
                 let unsubscribeAuth = () => {};
 
                 try {
-                    // Initialisation sécurisée (Compatible avec le chargement direct)
                     if (!firebase.apps.length) {
                         firebase.initializeApp(firebaseConfig);
                     }
@@ -97,7 +96,6 @@
                                     setGameState(docSnap.data());
                                     setLoading(false);
                                 } else {
-                                    // Création de la table de jeu au premier lancement
                                     docRef.set({
                                         players: {
                                             p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
@@ -108,7 +106,8 @@
                                         savedDices: [],
                                         currentTurnScore: 0,
                                         rollCount: 0,
-                                        message: "La partie est prête !"
+                                        message: "La partie est prête !",
+                                        bustedPending: null // Nouveau statut pour mettre le jeu en attente de validation
                                     }).catch(e => {
                                         setErrorMsg("Erreur d'écriture de la table : " + e.message);
                                         setLoading(false);
@@ -166,12 +165,12 @@
                     savedDices: [],
                     currentTurnScore: 0,
                     rollCount: 0,
-                    message: "Table réinitialisée."
+                    message: "Table réinitialisée.",
+                    bustedPending: null
                 });
                 setMyPlayerId(null);
             };
 
-            // NOUVELLE FONCTION : Génère les dés et sélectionne automatiquement les points obligatoires
             const generateAndEvaluateDices = (dicesToRoll) => {
                 let newDices = [];
                 for (let i = 0; i < dicesToRoll; i++) {
@@ -194,12 +193,10 @@
 
                 let hasPoints = false;
                 newDices.forEach(d => {
-                    // Sélectionne tout si c'est une combinaison complète de 5 dés
                     if (isStraight || isFull) {
                         d.selected = true;
                         hasPoints = true;
                     } 
-                    // Sinon, sélectionne obligatoirement les 1, les 5 et les groupes de 3+
                     else if (d.value === 1 || d.value === 5 || counts[d.value] >= 3) {
                         d.selected = true;
                         hasPoints = true;
@@ -227,25 +224,29 @@
                         newHistory.pop();
                         newScore = newHistory.length > 0 ? newHistory[newHistory.length - 1] : 0;
                         if (newHistory.length === 0) newHistory = [0];
-                        currentStrikes = 0;
-                        msg = "3ème coche ! Retour au score précédent.";
-                    }
+            const toggleDice = (index) => {
+                const newDices = [...gameState.dices];
+                newDices[index].selected = !newDices[index].selected;
+                updateGame({ dices: newDices });
+            };
 
-                    updateGame({
-                        players: {
-                            ...gameState.players,
-                            [gameState.turn]: { ...gameState.players[gameState.turn], score: newScore, history: newHistory, strikes: currentStrikes }
-                        },
-                        turn: gameState.turn === 'p1' ? 'p2' : 'p1',
-                        dices: [],
-                        savedDices: [],
-                        currentTurnScore: 0,
-                        rollCount: 0,
-                        message: msg
-                    });
-                } else {
-                    updateGame({ dices: newDices, rollCount: gameState.rollCount + 1, message: "Points détectés ! Relancez ou Gardez." });
-                }
+            const tradeFivesForOne = () => {
+                let found = 0;
+                const newDices = gameState.dices.map(d => {
+                    if (d.value === 5 && d.selected && !d.busted && found < 2) {
+                        found++;
+                        if (found === 1) {
+                            return { ...d, value: 1 };
+                        } else {
+                            // On transforme le deuxième 5 en un dé poubelle non-sélectionné pour le libérer
+                            const nonScoring = [2, 3, 4, 6];
+                            const randomGarbage = nonScoring[Math.floor(Math.random() * nonScoring.length)];
+                            return { ...d, value: randomGarbage, selected: false };
+                        }
+                    }
+                    return d;
+                });
+                updateGame({ dices: newDices, message: "Deux 🎲5 fusionnés en un 🎲1 ! (1 dé libéré)" });
             };
 
             const calculateSelection = () => {
@@ -255,14 +256,11 @@
                 const counts = {};
                 selected.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
                 
-                // Correction : Le Full et la Suite sont valides même après une "Main pleine"
                 if (selected.length === 5) {
                     const values = Object.values(counts);
-                    // Règle du Full (3 pareils + 2 pareils)
                     if (values.includes(3) && values.includes(2)) {
                         return { valid: true, score: 1500, isFull: true };
                     }
-                    // Règle de la Suite (1-2-3-4-5 ou 2-3-4-5-6)
                     if (values.length === 5) {
                         const sorted = Object.keys(counts).sort().join('');
                         if (sorted === '12345' || sorted === '23456') {
@@ -309,17 +307,21 @@
                             msg = "3ème coche ! Retour au score précédent.";
                         }
 
+                        newDices.forEach(d => { d.busted = true; d.selected = false; });
+
                         updateGame({
-                            players: {
-                                ...gameState.players,
-                                [gameState.turn]: { ...gameState.players[gameState.turn], score: newScore, history: newHistory, strikes: currentStrikes }
-                            },
-                            turn: gameState.turn === 'p1' ? 'p2' : 'p1',
-                            dices: [],
-                            savedDices: [],
-                            currentTurnScore: 0,
-                            rollCount: 0,
-                            message: msg
+                            savedDices: newSaved,
+                            dices: newDices,
+                            currentTurnScore: newTurnScore,
+                            rollCount: gameState.rollCount + 1,
+                            message: msg,
+                            bustedPending: {
+                                turn: gameState.turn === 'p1' ? 'p2' : 'p1',
+                                players: {
+                                    ...gameState.players,
+                                    [gameState.turn]: { ...gameState.players[gameState.turn], score: newScore, history: newHistory, strikes: currentStrikes }
+                                }
+                            }
                         });
                     } else {
                         updateGame({ 
@@ -339,8 +341,17 @@
                 const otherPlayerId = gameState.turn === 'p1' ? 'p2' : 'p1';
                 const otherPlayer = gameState.players[otherPlayerId];
 
+                // Si c'est une ouverture ratée, on déclenche aussi l'attente avec la croix rouge
                 if (currentPlayer.score === 0 && totalTurnScore < 500) {
-                    updateGame({ turn: otherPlayerId, dices: [], savedDices: [], currentTurnScore: 0, rollCount: 0, message: `Ouverture ratée (Il faut 500 min). Tour passé.` });
+                    const newDices = gameState.dices.map(d => ({...d, busted: true, selected: false}));
+                    updateGame({ 
+                        dices: newDices,
+                        message: `Ouverture ratée (Il faut 500 min). Tour passé.`,
+                        bustedPending: {
+                            turn: otherPlayerId,
+                            players: gameState.players
+                        }
+                    });
                     return;
                 }
 
@@ -363,6 +374,20 @@
                         [otherPlayerId]: { ...otherPlayer, score: otherPlayerScore, history: otherPlayerHistory }
                     },
                     turn: otherPlayerId, dices: [], savedDices: [], currentTurnScore: 0, rollCount: 0, message: msg
+                });
+            };
+
+            // Fonction pour passer le tour manuellement après avoir vu l'échec
+            const acknowledgeBust = () => {
+                updateGame({
+                    players: gameState.bustedPending.players,
+                    turn: gameState.bustedPending.turn,
+                    dices: [],
+                    savedDices: [],
+                    currentTurnScore: 0,
+                    rollCount: 0,
+                    bustedPending: null,
+                    message: "C'est à votre tour !"
                 });
             };
 
@@ -403,10 +428,14 @@
                 );
             }
 
+            // On vérifie si c'est encore à mon tour SAUF si le jeu attend la validation d'un chou blanc de l'autre joueur
             const isMyTurn = gameState.turn === myPlayerId;
-            const { valid, score } = calculateSelection();
+            const { valid, score, isFull, isStraight } = calculateSelection();
             const totalPending = gameState.currentTurnScore + (valid ? score : 0);
             const isEndingIn50 = totalPending % 100 === 50 && totalPending > 0;
+
+            const count5s = gameState.dices ? gameState.dices.filter(d => d.value === 5 && d.selected && !d.busted).length : 0;
+            const canTradeFives = count5s === 2 && !isFull && !isStraight;
 
             const renderStrikes = (strikes) => (
                 <div className="flex gap-1 mt-1 justify-center">
@@ -422,41 +451,63 @@
                         <div className={`text-center transition-opacity ${gameState.turn === 'p1' ? 'opacity-100' : 'opacity-50'}`}>
                             <h2 className={`font-bold ${gameState.turn === 'p1' ? 'text-blue-400' : 'text-slate-400'}`}>{myPlayerId === 'p1' ? 'Vous (Joueur 1)' : 'Joueur 1'}</h2>
                             <div className="text-3xl font-black">{gameState.players.p1.score} <span className="text-sm font-normal">pts</span></div>
-                            {renderStrikes(gameState.players.p1.strikes)}
+                            {renderStrikes(gameState.bustedPending ? gameState.bustedPending.players.p1.strikes : gameState.players.p1.strikes)}
                         </div>
                         <div className={`text-center transition-opacity ${gameState.turn === 'p2' ? 'opacity-100' : 'opacity-50'}`}>
                             <h2 className={`font-bold ${gameState.turn === 'p2' ? 'text-rose-400' : 'text-slate-400'}`}>{myPlayerId === 'p2' ? 'Vous (Joueur 2)' : 'Joueur 2'}</h2>
                             <div className="text-3xl font-black">{gameState.players.p2.score} <span className="text-sm font-normal">pts</span></div>
-                            {renderStrikes(gameState.players.p2.strikes)}
+                            {renderStrikes(gameState.bustedPending ? gameState.bustedPending.players.p2.strikes : gameState.players.p2.strikes)}
                         </div>
                     </div>
 
                     <div className="text-center font-semibold text-amber-400 mb-8 h-6">{gameState.message}</div>
 
                     <div className="flex-1 flex flex-col items-center justify-center">
-                        {!isMyTurn && gameState.dices.length > 0 && <p className="text-slate-400 mb-4 animate-pulse">Votre adversaire réfléchit...</p>}
+                        {!isMyTurn && gameState.dices.length > 0 && !gameState.bustedPending && <p className="text-slate-400 mb-4 animate-pulse">Votre adversaire réfléchit...</p>}
+                        {!isMyTurn && gameState.bustedPending && <p className="text-red-400 mb-4 font-bold">Votre adversaire a perdu son tour.</p>}
+                        
                         <div className="flex flex-wrap justify-center gap-4 mb-8 min-h-[80px]">
                             {gameState.dices.map((dice, idx) => (
-                                <div key={dice.id} className={`p-3 rounded-2xl shadow-lg transition-transform ${dice.selected ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'}`}>
-                                    <DiceIcon value={dice.value} selected={dice.selected} />
+                                <div key={dice.id} className={`relative p-3 rounded-2xl shadow-lg transition-transform ${dice.selected && !dice.busted ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'} ${dice.busted ? 'ring-4 ring-red-500 bg-red-50 text-slate-800' : ''}`}>
+                                    <DiceIcon value={dice.value} selected={dice.selected && !dice.busted} />
+                                    {dice.busted && (
+                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <i className="fas fa-xmark text-6xl text-red-500 opacity-80 drop-shadow-md"></i>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
 
-                        {gameState.dices.length > 0 && (
+                        {gameState.dices.length > 0 && !gameState.bustedPending && (
                             <div className={`px-4 py-2 rounded-full font-bold mb-8 transition-colors ${valid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
                                 {valid ? `Sélection automatique : +${score} pts` : 'Aucun point'}
+                            </div>
+                        )}
+                        
+                        {gameState.bustedPending && (
+                            <div className="px-4 py-2 rounded-full font-bold mb-8 bg-red-500/20 text-red-400">
+                                ❌ Perdu pour ce tour !
                             </div>
                         )}
 
                         <div className="text-2xl text-slate-300 mb-8">Total en cours : <span className="font-bold text-white">{totalPending}</span> pts</div>
 
                         {isMyTurn && (
-                            <div className="flex gap-4">
-                                {gameState.dices.length === 0 ? (
+                            <div className="flex flex-wrap justify-center gap-4 w-full max-w-xl">
+                                {gameState.bustedPending ? (
+                                    <button onClick={acknowledgeBust} className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 transition-transform active:scale-95">
+                                        Passer le tour
+                                    </button>
+                                ) : gameState.dices.length === 0 ? (
                                     <button onClick={rollDices} className="px-8 py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-xl shadow-lg shadow-amber-500/30 transition-transform active:scale-95">Lancer les dés</button>
                                 ) : (
                                     <>
+                                        {canTradeFives && (
+                                            <button onClick={tradeFivesForOne} className="px-6 py-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/30 transition-transform active:scale-95">
+                                                🔄 5+5 ➔ 1
+                                            </button>
+                                        )}
                                         <button onClick={saveSelection} disabled={!valid} className={`px-8 py-4 font-bold rounded-xl shadow-lg transition-all active:scale-95 ${valid ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>Relancer le reste</button>
                                         <button onClick={bankPoints} disabled={!valid || isEndingIn50} className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
                                             {isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder'}
