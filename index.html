@@ -9,15 +9,19 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Importation de Firebase (Version Compat, beaucoup plus stable pour ce format) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 </head>
 <body class="bg-slate-900 text-slate-100">
     <div id="root"></div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
+        // --- CONFIGURATION FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
             authDomain: "project-688816839048633365.firebaseapp.com",
@@ -27,15 +31,12 @@
             appId: "1:57106076475:web:82c33baaefade575a55d1e"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        window.db = db;
-        window.auth = auth;
-    </script>
-
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+        // Initialisation synchrone pour éviter l'écran vide
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const auth = firebase.auth();
 
         // Composant pour dessiner un vrai dé avec des points (SVG)
         const DiceIcon = ({ value, selected }) => {
@@ -59,14 +60,13 @@
         function App() {
             const [gameState, setGameState] = useState(null);
             const [loading, setLoading] = useState(true);
-            const [errorMsg, setErrorMsg] = useState(null); // Nouvel état pour les erreurs
+            const [errorMsg, setErrorMsg] = useState(null);
             const [myPlayerId, setMyPlayerId] = useState(localStorage.getItem('10000_playerId') || null);
 
-            // Initialisation et connexion Firebase
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        await window.auth.signInAnonymously();
+                        await auth.signInAnonymously();
                     } catch (error) {
                         console.error("Erreur d'authentification:", error);
                         setErrorMsg("Erreur d'authentification: " + error.message);
@@ -75,15 +75,15 @@
                 };
                 initAuth();
 
-                const unsubscribeAuth = window.auth.onAuthStateChanged((user) => {
+                const unsubscribeAuth = auth.onAuthStateChanged((user) => {
                     if (user) {
-                        const docRef = window.doc(window.db, "games", "shared_room");
-                        const unsubscribeDb = window.onSnapshot(docRef, (docSnap) => {
-                            if (docSnap.exists()) {
+                        const docRef = db.collection("games").doc("shared_room");
+                        const unsubscribeDb = docRef.onSnapshot((docSnap) => {
+                            if (docSnap.exists) {
                                 setGameState(docSnap.data());
                             } else {
                                 // État initial
-                                window.setDoc(docRef, {
+                                docRef.set({
                                     players: {
                                         p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
                                         p2: { name: "Joueur 2", score: 0, history: [0], active: false, strikes: 0 }
@@ -99,7 +99,7 @@
                             setLoading(false);
                         }, (error) => {
                             console.error("Erreur Firestore:", error);
-                            setErrorMsg("Erreur de base de données: " + error.message + " (As-tu bien configuré la clé API et les règles ?)");
+                            setErrorMsg("Erreur de base de données : " + error.message);
                             setLoading(false);
                         });
                         return () => unsubscribeDb();
@@ -110,8 +110,8 @@
             }, []);
 
             const updateGame = async (newState) => {
-                const docRef = window.doc(window.db, "games", "shared_room");
-                await window.setDoc(docRef, { ...gameState, ...newState });
+                const docRef = db.collection("games").doc("shared_room");
+                await docRef.set({ ...gameState, ...newState });
             };
 
             const joinGame = (playerId) => {
@@ -162,7 +162,6 @@
 
                 const isFirstRollOfTurn = gameState.rollCount === 0;
                 
-                // Vérifier s'il y a des points possibles (Chou-blanc)
                 const counts = {};
                 newDices.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
                 
@@ -171,9 +170,7 @@
                 Object.values(counts).forEach(count => { if (count >= 3) hasPoints = true; });
 
                 if (!hasPoints) {
-                    // CHOU-BLANC
                     let currentStrikes = gameState.players[gameState.turn].strikes;
-                    // Double coche si premier lancer du tour
                     const strikesToAdd = isFirstRollOfTurn ? 2 : 1;
                     currentStrikes += strikesToAdd;
                     
@@ -184,7 +181,7 @@
                         : `Chou-blanc ! Coche ajoutée. (${currentStrikes}/3)`;
 
                     if (currentStrikes >= 3) {
-                        newHistory.pop(); // Enlève le score actuel
+                        newHistory.pop();
                         newScore = newHistory.length > 0 ? newHistory[newHistory.length - 1] : 0;
                         if (newHistory.length === 0) newHistory = [0];
                         currentStrikes = 0;
@@ -230,7 +227,6 @@
                 const counts = {};
                 selected.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
                 
-                // Règle du Full (3 + 2) sur le TOUT PREMIER lancer (5 dés sélectionnés)
                 if (gameState.rollCount === 1 && selected.length === 5) {
                     const values = Object.values(counts);
                     if (values.includes(3) && values.includes(2)) {
@@ -262,7 +258,6 @@
                 const { score } = calculateSelection();
                 const newSaved = [...gameState.savedDices, ...gameState.dices.filter(d => d.selected)];
                 
-                // Si les 5 dés sont gardés (Main pleine / Full), on vide le plateau pour relancer les 5
                 if (newSaved.length === 5) {
                     updateGame({
                         savedDices: [],
@@ -286,7 +281,6 @@
                 const otherPlayerId = gameState.turn === 'p1' ? 'p2' : 'p1';
                 const otherPlayer = gameState.players[otherPlayerId];
 
-                // Règle d'ouverture
                 if (currentPlayer.score === 0 && totalTurnScore < 500) {
                     updateGame({
                         turn: otherPlayerId,
@@ -304,7 +298,6 @@
                 let otherPlayerHistory = [...otherPlayer.history];
                 let msg = `${currentPlayer.name} garde ${totalTurnScore} pts.`;
 
-                // Règle de collision (Tracer la ligne)
                 if (newScore === otherPlayerScore && newScore > 0) {
                     otherPlayerHistory.pop();
                     otherPlayerScore = otherPlayerHistory.length > 0 ? otherPlayerHistory[otherPlayerHistory.length - 1] : 0;
@@ -319,7 +312,7 @@
                             ...currentPlayer,
                             score: newScore,
                             history: [...currentPlayer.history, newScore],
-                            strikes: 0 // Remise à zéro des coches après avoir marqué
+                            strikes: 0 
                         },
                         [otherPlayerId]: {
                             ...otherPlayer,
@@ -340,18 +333,18 @@
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-6 text-center">
                         <i className="fas fa-exclamation-triangle text-red-500 text-5xl mb-4"></i>
-                        <h1 className="text-2xl font-bold text-red-400 mb-2">Erreur de Connexion Firebase</h1>
+                        <h1 className="text-2xl font-bold text-red-400 mb-2">Google Bloque l'Accès</h1>
                         <p className="text-slate-300 max-w-md bg-slate-800 p-4 rounded mb-6 font-mono text-sm break-words border border-slate-700 shadow-inner">
                             {errorMsg}
                         </p>
                         <p className="text-slate-400 max-w-lg mb-6">
-                            Cette erreur est très probablement due à la <strong>Restriction de clé API</strong> que tu as configurée dans Google Cloud.
+                            Assure-toi d'avoir ajouté <strong>/*</strong> à la fin de ton lien dans Google Cloud (<code>https://mfazlija.github.io/10000/*</code>).
                         </p>
                     </div>
                 );
             }
 
-            if (loading || !gameState) return <div className="min-h-screen flex items-center justify-center">Chargement...</div>;
+            if (loading || !gameState) return <div className="min-h-screen flex items-center justify-center">Chargement de la table...</div>;
 
             if (!myPlayerId) {
                 return (
@@ -385,7 +378,6 @@
             const { valid, score } = calculateSelection();
             const totalPending = gameState.currentTurnScore + (valid ? score : 0);
             
-            // Règle du cul de chouette (relance forcée si finit par 50)
             const isEndingIn50 = totalPending % 100 === 50 && totalPending > 0;
 
             const renderStrikes = (strikes) => {
