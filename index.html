@@ -250,21 +250,23 @@
 
             const tradeFivesForOne = () => {
                 let found = 0;
-                const newDices = gameState.dices.map(d => {
+                const newDices = [];
+                
+                gameState.dices.forEach(d => {
                     if (d.value === 5 && d.selected && !d.busted && found < 2) {
                         found++;
                         if (found === 1) {
-                            return { ...d, value: 1 };
-                        } else {
-                            // On transforme le deuxième 5 en un dé poubelle non-sélectionné pour le libérer
-                            const nonScoring = [2, 3, 4, 6];
-                            const randomGarbage = nonScoring[Math.floor(Math.random() * nonScoring.length)];
-                            return { ...d, value: randomGarbage, selected: false };
+                            // Le premier 5 devient un 1
+                            newDices.push({ ...d, value: 1 });
                         }
+                        // Le deuxième 5 n'est pas ajouté à l'écran : il disparaît de la table
+                        // pour rejoindre virtuellement ta main (il sera compté comme manquant au prochain lancer).
+                    } else {
+                        newDices.push(d);
                     }
-                    return d;
                 });
-                updateGame({ dices: newDices, message: "Deux 🎲5 fusionnés en un 🎲1 ! (1 dé libéré)" });
+                
+                updateGame({ dices: newDices, message: "Deux 🎲5 fusionnés en un 🎲1 ! (Dé libéré pour la relance)" });
             };
 
             const calculateSelection = () => {
