@@ -483,17 +483,19 @@
                         {!isMyTurn && gameState.dices.length > 0 && !gameState.bustedPending && <p className="text-slate-400 mb-4 animate-pulse">Votre adversaire réfléchit...</p>}
                         {!isMyTurn && gameState.bustedPending && <p className="text-red-400 mb-4 font-bold">Votre adversaire a perdu son tour.</p>}
                         
-                        <div className="flex flex-wrap justify-center gap-4 mb-8 min-h-[80px]">
+                        <div className="relative flex flex-wrap justify-center gap-4 mb-8 min-h-[80px] w-full">
                             {gameState.dices.map((dice, idx) => (
-                                <div key={dice.id} className={`relative p-3 rounded-2xl shadow-lg transition-transform ${dice.selected && !dice.busted ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'} ${dice.busted ? 'ring-4 ring-red-500 bg-red-50 text-slate-800' : ''}`}>
+                                <div key={dice.id} className={`relative p-3 rounded-2xl shadow-lg transition-transform ${dice.selected && !dice.busted ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'}`}>
                                     <DiceIcon value={dice.value} selected={dice.selected && !dice.busted} />
-                                    {dice.busted && (
-                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                            <i className="fas fa-xmark text-6xl text-red-500 opacity-80 drop-shadow-md"></i>
-                                        </div>
-                                    )}
                                 </div>
                             ))}
+                            
+                            {/* Grande croix rouge transparente par-dessus tous les dés */}
+                            {gameState.bustedPending && (
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                    <i className="fas fa-xmark text-red-500/30 drop-shadow-2xl" style={{ fontSize: '15rem' }}></i>
+                                </div>
+                            )}
                         </div>
 
                         {gameState.dices.length > 0 && !gameState.bustedPending && (
