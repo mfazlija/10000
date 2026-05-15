@@ -3,23 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Le 10 000</title>
+    <title>Jeu du 10 000</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="bg-slate-900 text-white font-sans overflow-hidden h-screen">
-    <div id="root" class="h-full"></div>
+<body class="bg-slate-900 text-slate-100">
+    <div id="root"></div>
 
-    <script type="text/babel" data-type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-        const { useState, useEffect, useCallback } = React;
-
-        // Ta configuration Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyCDJzVPNhyNdU95WTbZ2hTnCV_U6tFeExk",
             authDomain: "project-688816839048633365.firebaseapp.com",
@@ -32,450 +30,457 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+        window.db = db;
+        window.auth = auth;
+    </script>
 
-        const getScoreDetails = (diceValues) => {
-            if (diceValues.length === 0) return { score: 0, isValid: false, unused: [] };
-            
-            let counts = {};
-            diceValues.forEach(d => counts[d] = (counts[d] || 0) + 1);
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-            const isStraight = [1, 2, 3, 4, 5].every(v => counts[v] === 1);
-            if (isStraight && diceValues.length === 5) return { score: 1500, isValid: true, unused: [] };
+        // Composant pour dessiner un vrai dé avec des points (SVG)
+        const DiceIcon = ({ value, selected }) => {
+            const dotClass = selected ? "fill-white" : "fill-slate-800";
+            const dots = {
+                1: [<circle key="1" cx="50" cy="50" r="10" className={dotClass} />],
+                2: [<circle key="1" cx="25" cy="25" r="10" className={dotClass} />, <circle key="2" cx="75" cy="75" r="10" className={dotClass} />],
+                3: [<circle key="1" cx="25" cy="25" r="10" className={dotClass} />, <circle key="2" cx="50" cy="50" r="10" className={dotClass} />, <circle key="3" cx="75" cy="75" r="10" className={dotClass} />],
+                4: [<circle key="1" cx="25" cy="25" r="10" className={dotClass} />, <circle key="2" cx="75" cy="25" r="10" className={dotClass} />, <circle key="3" cx="25" cy="75" r="10" className={dotClass} />, <circle key="4" cx="75" cy="75" r="10" className={dotClass} />],
+                5: [<circle key="1" cx="25" cy="25" r="10" className={dotClass} />, <circle key="2" cx="75" cy="25" r="10" className={dotClass} />, <circle key="3" cx="50" cy="50" r="10" className={dotClass} />, <circle key="4" cx="25" cy="75" r="10" className={dotClass} />, <circle key="5" cx="75" cy="75" r="10" className={dotClass} />],
+                6: [<circle key="1" cx="25" cy="20" r="10" className={dotClass} />, <circle key="2" cx="75" cy="20" r="10" className={dotClass} />, <circle key="3" cx="25" cy="50" r="10" className={dotClass} />, <circle key="4" cx="75" cy="50" r="10" className={dotClass} />, <circle key="5" cx="25" cy="80" r="10" className={dotClass} />, <circle key="6" cx="75" cy="80" r="10" className={dotClass} />]
+            };
 
-            let has3 = false; let has2 = false;
-            for (let v in counts) {
-                if (counts[v] === 3) has3 = true;
-                if (counts[v] === 2) has2 = true;
-            }
-            if (has3 && has2 && diceValues.length === 5) {
-                return { score: 1500, isValid: true, unused: [] };
-            }
-
-            let score = 0;
-            let unused = [];
-
-            for (let v = 1; v <= 6; v++) {
-                let count = counts[v] || 0;
-                if (count === 0) continue;
-
-                if (count >= 3) {
-                    let base = (v === 1) ? 1000 : (v === 5 ? 500 : v * 100);
-                    let multiplier = Math.pow(2, count - 3);
-                    score += base * multiplier;
-                } else {
-                    if (v === 1) {
-                        score += count * 100;
-                    } else if (v === 5) {
-                        score += count * 50;
-                    } else {
-                        for (let i = 0; i < count; i++) unused.push(v);
-                    }
-                }
-            }
-
-            return { score, isValid: score > 0 && unused.length === 0, unused };
-        };
-
-        const canScore = (diceValues) => {
-            if (diceValues.length === 0) return false;
-            if (diceValues.includes(1) || diceValues.includes(5)) return true;
-            
-            let counts = {};
-            for (let d of diceValues) {
-                counts[d] = (counts[d] || 0) + 1;
-                if (counts[d] >= 3) return true;
-            }
-            return false;
-        };
-
-        const initialGameState = {
-            players: [
-                { id: 0, name: "Joueur 1", scores: [0], coches: 0, joined: false },
-                { id: 1, name: "Joueur 2", scores: [0], coches: 0, joined: false }
-            ],
-            turn: 0,
-            dice: [
-                { id: 0, val: 1, state: 'idle' },
-                { id: 1, val: 2, state: 'idle' },
-                { id: 2, val: 3, state: 'idle' },
-                { id: 3, val: 4, state: 'idle' },
-                { id: 4, val: 5, state: 'idle' }
-            ],
-            rollCount: 0,
-            turnScore: 0,
-            logs: ["La partie est prête !"]
+            return (
+                <svg viewBox="0 0 100 100" className="w-12 h-12 md:w-16 md:h-16">
+                    {dots[value]}
+                </svg>
+            );
         };
 
         function App() {
-            const [user, setUser] = useState(null);
             const [gameState, setGameState] = useState(null);
-            
-            const [myPlayerId, setMyPlayerId] = useState(() => {
-                const saved = localStorage.getItem('10000_playerId');
-                return saved !== null ? parseInt(saved, 10) : null;
-            });
+            const [loading, setLoading] = useState(true);
+            const [errorMsg, setErrorMsg] = useState(null); // Nouvel état pour les erreurs
+            const [myPlayerId, setMyPlayerId] = useState(localStorage.getItem('10000_playerId') || null);
 
+            // Initialisation et connexion Firebase
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        const userCred = await signInAnonymously(auth);
-                        setUser(userCred.user);
+                        await window.auth.signInAnonymously();
                     } catch (error) {
-                        console.error("Auth error:", error);
+                        console.error("Erreur d'authentification:", error);
+                        setErrorMsg("Erreur d'authentification: " + error.message);
+                        setLoading(false);
                     }
                 };
                 initAuth();
-            }, []);
 
-            useEffect(() => {
-                if (!user) return;
-                const gameRef = doc(db, 'games', 'room_10000');
-                
-                const unsubscribe = onSnapshot(gameRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        setGameState(docSnap.data());
-                    } else {
-                        setDoc(gameRef, initialGameState);
-                    }
-                }, (err) => console.error("Firestore error:", err));
-
-                return () => unsubscribe();
-            }, [user]);
-
-            const pushState = async (newState) => {
-                const gameRef = doc(db, 'games', 'room_10000');
-                await setDoc(gameRef, newState);
-            };
-
-            const logMessage = (state, msg) => {
-                state.logs = [msg, ...state.logs].slice(0, 5);
-            };
-
-            const renderDieSVG = (val, dotColor) => {
-                const dots = {
-                    1: [<circle cx="50" cy="50" r="10" fill={dotColor} key="1"/>],
-                    2: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="2"/>],
-                    3: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="50" cy="50" r="10" fill={dotColor} key="2"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="3"/>],
-                    4: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="25" r="10" fill={dotColor} key="2"/>, <circle cx="25" cy="75" r="10" fill={dotColor} key="3"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="4"/>],
-                    5: [<circle cx="25" cy="25" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="25" r="10" fill={dotColor} key="2"/>, <circle cx="50" cy="50" r="10" fill={dotColor} key="3"/>, <circle cx="25" cy="75" r="10" fill={dotColor} key="4"/>, <circle cx="75" cy="75" r="10" fill={dotColor} key="5"/>],
-                    6: [<circle cx="25" cy="20" r="10" fill={dotColor} key="1"/>, <circle cx="75" cy="20" r="10" fill={dotColor} key="2"/>, <circle cx="25" cy="50" r="10" fill={dotColor} key="3"/>, <circle cx="75" cy="50" r="10" fill={dotColor} key="4"/>, <circle cx="25" cy="80" r="10" fill={dotColor} key="5"/>, <circle cx="75" cy="80" r="10" fill={dotColor} key="6"/>],
-                };
-                return (
-                    <svg viewBox="0 0 100 100" className="w-full h-full p-2 drop-shadow-sm">
-                        {dots[val] || dots[1]}
-                    </svg>
-                );
-            };
-
-            const renderDie = (die) => {
-                let bgClass = "bg-white text-slate-900";
-                let ringClass = "";
-                let dotColor = "#0f172a";
-                
-                if (die.state === 'locked') {
-                    bgClass = "bg-slate-300 opacity-60";
-                    dotColor = "#64748b";
-                } else if (die.state === 'selected') {
-                    bgClass = "bg-emerald-400";
-                    ringClass = "ring-4 ring-emerald-200";
-                    dotColor = "#ffffff";
-                }
-
-                const isInteractable = isMyTurn && gameState.rollCount > 0 && die.state !== 'locked';
-
-                return (
-                    <div 
-                        key={die.id}
-                        onClick={() => handleToggleDie(die.id)}
-                        className={`w-16 h-16 md:w-20 md:h-20 rounded-xl flex items-center justify-center shadow-lg transform transition-all 
-                        ${bgClass} ${ringClass} ${isInteractable ? 'cursor-pointer hover:scale-105' : ''}`}
-                    >
-                        {renderDieSVG(die.val, dotColor)}
-                    </div>
-                );
-            };
-
-            const handleRoll = () => {
-                if (gameState.turn !== myPlayerId) return;
-
-                let state = JSON.parse(JSON.stringify(gameState));
-                let p = state.players[myPlayerId];
-                
-                const selectedDice = state.dice.filter(d => d.state === 'selected');
-                if (selectedDice.length > 0) {
-                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
-                    if (!isValid) return; 
-                    state.turnScore += score;
-                    state.dice.forEach(d => { if (d.state === 'selected') d.state = 'locked'; });
-                }
-
-                if (state.dice.every(d => d.state === 'locked')) {
-                    state.dice.forEach(d => d.state = 'idle');
-                    logMessage(state, `${p.name} a la main chaude et relance les 5 dés !`);
-                }
-
-                let rolledValues = [];
-                state.dice.forEach(d => {
-                    if (d.state === 'idle') {
-                        d.val = Math.floor(Math.random() * 6) + 1;
-                        rolledValues.push(d.val);
+                const unsubscribeAuth = window.auth.onAuthStateChanged((user) => {
+                    if (user) {
+                        const docRef = window.doc(window.db, "games", "shared_room");
+                        const unsubscribeDb = window.onSnapshot(docRef, (docSnap) => {
+                            if (docSnap.exists()) {
+                                setGameState(docSnap.data());
+                            } else {
+                                // État initial
+                                window.setDoc(docRef, {
+                                    players: {
+                                        p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
+                                        p2: { name: "Joueur 2", score: 0, history: [0], active: false, strikes: 0 }
+                                    },
+                                    turn: 'p1',
+                                    dices: [],
+                                    savedDices: [],
+                                    currentTurnScore: 0,
+                                    rollCount: 0,
+                                    message: "La partie est prête !"
+                                });
+                            }
+                            setLoading(false);
+                        }, (error) => {
+                            console.error("Erreur Firestore:", error);
+                            setErrorMsg("Erreur de base de données: " + error.message + " (As-tu bien configuré la clé API et les règles ?)");
+                            setLoading(false);
+                        });
+                        return () => unsubscribeDb();
                     }
                 });
-                state.rollCount += 1;
 
-                if (!canScore(rolledValues)) {
-                    if (state.rollCount === 1) {
-                        p.coches += 2;
-                        logMessage(state, `💥 Aïe ! Double coche pour ${p.name} sur son 1er lancer du tour.`);
-                    } else {
-                        p.coches += 1;
-                        logMessage(state, `💨 Chou-blanc pour ${p.name}. Tour perdu.`);
-                    }
+                return () => unsubscribeAuth();
+            }, []);
 
-                    if (p.coches >= 3) {
-                        let oldScore = p.scores[p.scores.length - 1];
-                        if (p.scores.length > 1) {
-                            p.scores.pop();
-                        }
-                        let newScore = p.scores[p.scores.length - 1];
-                        logMessage(state, `📉 ${p.name} a pris sa 3ème coche ! Il chute de ${oldScore} à ${newScore} points.`);
-                        p.coches = 0;
-                    }
-
-                    state.turnScore = 0;
-                    state.rollCount = 0;
-                    state.dice.forEach(d => d.state = 'idle');
-                    state.turn = state.turn === 0 ? 1 : 0;
-                }
-
-                pushState(state);
+            const updateGame = async (newState) => {
+                const docRef = window.doc(window.db, "games", "shared_room");
+                await window.setDoc(docRef, { ...gameState, ...newState });
             };
 
-            const handleToggleDie = (dieId) => {
-                if (gameState.turn !== myPlayerId) return;
-                let state = JSON.parse(JSON.stringify(gameState));
-                let die = state.dice.find(d => d.id === dieId);
-                
-                if (state.rollCount === 0 || die.state === 'locked') return;
-
-                die.state = die.state === 'idle' ? 'selected' : 'idle';
-                pushState(state);
-            };
-
-            const handleBank = () => {
-                if (gameState.turn !== myPlayerId) return;
-
-                let state = JSON.parse(JSON.stringify(gameState));
-                let p = state.players[myPlayerId];
-
-                const selectedDice = state.dice.filter(d => d.state === 'selected');
-                let scoreAAjouter = 0;
-
-                if (selectedDice.length > 0) {
-                    const { score, isValid } = getScoreDetails(selectedDice.map(d => d.val));
-                    if (!isValid) return; 
-                    scoreAAjouter = score;
-                }
-
-                let totalGain = state.turnScore + scoreAAjouter;
-
-                // VERIFICATION DE SÉCURITÉ : Impossible de garder un score qui finit par 50
-                if (totalGain % 100 === 50) {
-                    return; 
-                }
-
-                state.turnScore += scoreAAjouter;
-                let currentTotal = p.scores[p.scores.length - 1];
-                let newTotal = currentTotal + totalGain;
-
-                if (p.scores.length === 1 && newTotal < 500) {
-                    alert("Il faut au moins 500 points pour ouvrir !");
-                    return;
-                }
-
-                p.scores.push(newTotal);
-                logMessage(state, `✅ ${p.name} sécurise et monte à ${newTotal} points.`);
-
-                let otherPlayerId = myPlayerId === 0 ? 1 : 0;
-                let otherP = state.players[otherPlayerId];
-                let otherTotal = otherP.scores[otherP.scores.length - 1];
-
-                if (otherTotal === newTotal && newTotal > 0) {
-                    if (otherP.scores.length > 1) {
-                        otherP.scores.pop();
+            const joinGame = (playerId) => {
+                localStorage.setItem('10000_playerId', playerId);
+                setMyPlayerId(playerId);
+                updateGame({
+                    players: {
+                        ...gameState.players,
+                        [playerId]: { ...gameState.players[playerId], active: true }
                     }
-                    let otherNewTotal = otherP.scores[otherP.scores.length - 1];
-                    logMessage(state, `⚔️ INCROYABLE ! ${p.name} trace la ligne de ${otherP.name} qui retombe à ${otherNewTotal} pts !`);
-                }
-
-                if (newTotal >= 10000) {
-                    logMessage(state, `🏆 ${p.name} a atteint 10 000 points et gagne la partie !`);
-                }
-
-                state.turnScore = 0;
-                state.rollCount = 0;
-                state.dice.forEach(d => d.state = 'idle');
-                state.turn = otherPlayerId;
-
-                pushState(state);
+                });
             };
 
-            const handleClearTable = () => {
-                let state = JSON.parse(JSON.stringify(initialGameState));
-                pushState(state);
+            const leaveGame = () => {
                 localStorage.removeItem('10000_playerId');
+                updateGame({
+                    players: {
+                        ...gameState.players,
+                        [myPlayerId]: { ...gameState.players[myPlayerId], active: false }
+                    }
+                });
                 setMyPlayerId(null);
             };
 
-            if (!gameState) return <div className="flex h-screen items-center justify-center text-white bg-slate-900">Chargement...</div>;
+            const resetTable = () => {
+                localStorage.removeItem('10000_playerId');
+                updateGame({
+                    players: {
+                        p1: { name: "Joueur 1", score: 0, history: [0], active: false, strikes: 0 },
+                        p2: { name: "Joueur 2", score: 0, history: [0], active: false, strikes: 0 }
+                    },
+                    turn: 'p1',
+                    dices: [],
+                    savedDices: [],
+                    currentTurnScore: 0,
+                    rollCount: 0,
+                    message: "Table réinitialisée."
+                });
+                setMyPlayerId(null);
+            };
 
-            if (myPlayerId === null) {
+            const rollDices = () => {
+                const dicesToRoll = 5 - gameState.savedDices.length;
+                let newDices = [];
+                for (let i = 0; i < dicesToRoll; i++) {
+                    newDices.push({ id: Math.random(), value: Math.floor(Math.random() * 6) + 1, selected: false });
+                }
+
+                const isFirstRollOfTurn = gameState.rollCount === 0;
+                
+                // Vérifier s'il y a des points possibles (Chou-blanc)
+                const counts = {};
+                newDices.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
+                
+                let hasPoints = false;
+                if (counts[1] || counts[5]) hasPoints = true;
+                Object.values(counts).forEach(count => { if (count >= 3) hasPoints = true; });
+
+                if (!hasPoints) {
+                    // CHOU-BLANC
+                    let currentStrikes = gameState.players[gameState.turn].strikes;
+                    // Double coche si premier lancer du tour
+                    const strikesToAdd = isFirstRollOfTurn ? 2 : 1;
+                    currentStrikes += strikesToAdd;
+                    
+                    let newScore = gameState.players[gameState.turn].score;
+                    let newHistory = [...gameState.players[gameState.turn].history];
+                    let msg = isFirstRollOfTurn 
+                        ? `Chou-blanc au 1er lancer ! Double coche. (${currentStrikes}/3)`
+                        : `Chou-blanc ! Coche ajoutée. (${currentStrikes}/3)`;
+
+                    if (currentStrikes >= 3) {
+                        newHistory.pop(); // Enlève le score actuel
+                        newScore = newHistory.length > 0 ? newHistory[newHistory.length - 1] : 0;
+                        if (newHistory.length === 0) newHistory = [0];
+                        currentStrikes = 0;
+                        msg = "3ème coche ! Retour au score précédent.";
+                    }
+
+                    updateGame({
+                        players: {
+                            ...gameState.players,
+                            [gameState.turn]: { 
+                                ...gameState.players[gameState.turn], 
+                                score: newScore,
+                                history: newHistory,
+                                strikes: currentStrikes
+                            }
+                        },
+                        turn: gameState.turn === 'p1' ? 'p2' : 'p1',
+                        dices: [],
+                        savedDices: [],
+                        currentTurnScore: 0,
+                        rollCount: 0,
+                        message: msg
+                    });
+                } else {
+                    updateGame({
+                        dices: newDices,
+                        rollCount: gameState.rollCount + 1,
+                        message: "Sélectionnez les dés à garder."
+                    });
+                }
+            };
+
+            const toggleDice = (index) => {
+                const newDices = [...gameState.dices];
+                newDices[index].selected = !newDices[index].selected;
+                updateGame({ dices: newDices });
+            };
+
+            const calculateSelection = () => {
+                const selected = gameState.dices.filter(d => d.selected);
+                if (selected.length === 0) return { valid: false, score: 0 };
+
+                const counts = {};
+                selected.forEach(d => counts[d.value] = (counts[d.value] || 0) + 1);
+                
+                // Règle du Full (3 + 2) sur le TOUT PREMIER lancer (5 dés sélectionnés)
+                if (gameState.rollCount === 1 && selected.length === 5) {
+                    const values = Object.values(counts);
+                    if (values.includes(3) && values.includes(2)) {
+                        return { valid: true, score: 1500, isFull: true };
+                    }
+                }
+
+                let score = 0;
+                let valid = true;
+
+                for (const [valStr, count] of Object.entries(counts)) {
+                    const val = parseInt(valStr);
+                    if (count >= 3) {
+                        if (val === 1) score += 1000 * Math.pow(2, count - 3);
+                        else score += (val * 100) * Math.pow(2, count - 3);
+                    } else if (val === 1) {
+                        score += count * 100;
+                    } else if (val === 5) {
+                        score += count * 50;
+                    } else {
+                        valid = false;
+                    }
+                }
+
+                return { valid, score };
+            };
+
+            const saveSelection = () => {
+                const { score } = calculateSelection();
+                const newSaved = [...gameState.savedDices, ...gameState.dices.filter(d => d.selected)];
+                
+                // Si les 5 dés sont gardés (Main pleine / Full), on vide le plateau pour relancer les 5
+                if (newSaved.length === 5) {
+                    updateGame({
+                        savedDices: [],
+                        dices: [],
+                        currentTurnScore: gameState.currentTurnScore + score,
+                        message: "Main pleine ! Vous pouvez relancer 5 dés."
+                    });
+                } else {
+                    updateGame({
+                        savedDices: newSaved,
+                        dices: gameState.dices.filter(d => !d.selected),
+                        currentTurnScore: gameState.currentTurnScore + score,
+                        message: "Relancez ou Gardez vos points."
+                    });
+                }
+            };
+
+            const bankPoints = () => {
+                const totalTurnScore = gameState.currentTurnScore + (calculateSelection().valid ? calculateSelection().score : 0);
+                const currentPlayer = gameState.players[gameState.turn];
+                const otherPlayerId = gameState.turn === 'p1' ? 'p2' : 'p1';
+                const otherPlayer = gameState.players[otherPlayerId];
+
+                // Règle d'ouverture
+                if (currentPlayer.score === 0 && totalTurnScore < 500) {
+                    updateGame({
+                        turn: otherPlayerId,
+                        dices: [],
+                        savedDices: [],
+                        currentTurnScore: 0,
+                        rollCount: 0,
+                        message: `Ouverture ratée (Il faut 500 minimum). Tour passé.`
+                    });
+                    return;
+                }
+
+                const newScore = currentPlayer.score + totalTurnScore;
+                let otherPlayerScore = otherPlayer.score;
+                let otherPlayerHistory = [...otherPlayer.history];
+                let msg = `${currentPlayer.name} garde ${totalTurnScore} pts.`;
+
+                // Règle de collision (Tracer la ligne)
+                if (newScore === otherPlayerScore && newScore > 0) {
+                    otherPlayerHistory.pop();
+                    otherPlayerScore = otherPlayerHistory.length > 0 ? otherPlayerHistory[otherPlayerHistory.length - 1] : 0;
+                    if (otherPlayerHistory.length === 0) otherPlayerHistory = [0];
+                    msg = `💥 COLLISION ! ${otherPlayer.name} a été tracé et redescend à ${otherPlayerScore} pts !`;
+                }
+
+                updateGame({
+                    players: {
+                        ...gameState.players,
+                        [gameState.turn]: {
+                            ...currentPlayer,
+                            score: newScore,
+                            history: [...currentPlayer.history, newScore],
+                            strikes: 0 // Remise à zéro des coches après avoir marqué
+                        },
+                        [otherPlayerId]: {
+                            ...otherPlayer,
+                            score: otherPlayerScore,
+                            history: otherPlayerHistory
+                        }
+                    },
+                    turn: otherPlayerId,
+                    dices: [],
+                    savedDices: [],
+                    currentTurnScore: 0,
+                    rollCount: 0,
+                    message: msg
+                });
+            };
+
+            if (errorMsg) {
                 return (
-                    <div className="flex flex-col h-screen items-center justify-center bg-slate-900 text-white p-6">
-                        <h1 className="text-4xl font-bold mb-8 text-amber-400">🎲 Le 10 000</h1>
-                        <p className="mb-8 text-slate-300 text-center max-w-md">Envoyez ce lien à votre adversaire. Choisissez votre place :</p>
-                        
-                        <div className="flex gap-6 w-full max-w-md">
-                            {[0, 1].map(idx => {
-                                const p = gameState.players[idx];
-                                return (
-                                    <button 
-                                        key={idx}
-                                        onClick={() => {
-                                            let state = JSON.parse(JSON.stringify(gameState));
-                                            state.players[idx].joined = true;
-                                            pushState(state);
-                                            localStorage.setItem('10000_playerId', idx);
-                                            setMyPlayerId(idx);
-                                        }}
-                                        disabled={p.joined}
-                                        className={`flex-1 p-6 rounded-xl font-bold text-xl transition-all ${p.joined ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1'}`}
-                                    >
-                                        {p.joined ? 'Pris' : `Jouer ${idx + 1}`}
-                                    </button>
-                                );
-                            })}
+                    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-6 text-center">
+                        <i className="fas fa-exclamation-triangle text-red-500 text-5xl mb-4"></i>
+                        <h1 className="text-2xl font-bold text-red-400 mb-2">Erreur de Connexion Firebase</h1>
+                        <p className="text-slate-300 max-w-md bg-slate-800 p-4 rounded mb-6 font-mono text-sm break-words border border-slate-700 shadow-inner">
+                            {errorMsg}
+                        </p>
+                        <p className="text-slate-400 max-w-lg mb-6">
+                            Cette erreur est très probablement due à la <strong>Restriction de clé API</strong> que tu as configurée dans Google Cloud.
+                        </p>
+                    </div>
+                );
+            }
+
+            if (loading || !gameState) return <div className="min-h-screen flex items-center justify-center">Chargement...</div>;
+
+            if (!myPlayerId) {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+                        <div className="text-4xl mb-6">🎲 <span className="font-bold text-amber-500">Le 10 000</span></div>
+                        <p className="mb-8 text-slate-400 text-center">Envoyez ce lien à votre adversaire. Choisissez votre place :</p>
+                        <div className="flex gap-6">
+                            <button 
+                                onClick={() => joinGame('p1')}
+                                disabled={gameState.players.p1.active}
+                                className={`px-8 py-4 rounded-xl font-bold text-lg transition ${gameState.players.p1.active ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg'}`}
+                            >
+                                {gameState.players.p1.active ? 'Pris' : 'Jouer 1'}
+                            </button>
+                            <button 
+                                onClick={() => joinGame('p2')}
+                                disabled={gameState.players.p2.active}
+                                className={`px-8 py-4 rounded-xl font-bold text-lg transition ${gameState.players.p2.active ? 'bg-slate-800 text-slate-600' : 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg'}`}
+                            >
+                                {gameState.players.p2.active ? 'Pris' : 'Jouer 2'}
+                            </button>
                         </div>
-                        <button onClick={handleClearTable} className="mt-12 p-3 text-sm text-red-500/70 hover:text-red-400 bg-red-500/10 rounded-lg">
+                        <button onClick={resetTable} className="mt-16 text-red-500 text-sm underline hover:text-red-400">
                             Vider la table (Forcer la réinitialisation des places)
                         </button>
                     </div>
                 );
             }
 
-            const myPlayer = gameState.players[myPlayerId];
-            const otherPlayer = gameState.players[myPlayerId === 0 ? 1 : 0];
             const isMyTurn = gameState.turn === myPlayerId;
-
-            const selectedDice = gameState.dice.filter(d => d.state === 'selected');
-            const { score: currentSelectionScore, isValid: selectionValid } = getScoreDetails(selectedDice.map(d => d.val));
+            const { valid, score } = calculateSelection();
+            const totalPending = gameState.currentTurnScore + (valid ? score : 0);
             
-            // Calcul du score potentiel (points déjà acquis ce tour + sélection en cours)
-            const potentialTurnScore = gameState.turnScore + (selectionValid ? currentSelectionScore : 0);
+            // Règle du cul de chouette (relance forcée si finit par 50)
+            const isEndingIn50 = totalPending % 100 === 50 && totalPending > 0;
 
-            const canRoll = isMyTurn && (gameState.rollCount === 0 || (selectedDice.length > 0 && selectionValid));
-            
-            // On vérifie que le score potentiel est > 0 ET qu'il ne finit PAS par 50
-            const scoreDoesNotEndIn50 = potentialTurnScore % 100 !== 50;
-            const canBank = isMyTurn && gameState.rollCount > 0 && 
-                            ((selectionValid && currentSelectionScore > 0) || (gameState.turnScore > 0 && selectedDice.length === 0)) &&
-                            scoreDoesNotEndIn50;
+            const renderStrikes = (strikes) => {
+                return (
+                    <div className="flex gap-1 mt-1 justify-center">
+                        <div className={`w-3 h-3 rounded-full ${strikes >= 1 ? 'bg-red-500' : 'bg-slate-700'}`}></div>
+                        <div className={`w-3 h-3 rounded-full ${strikes >= 2 ? 'bg-red-500' : 'bg-slate-700'}`}></div>
+                        <div className={`w-3 h-3 rounded-full ${strikes >= 3 ? 'bg-red-500' : 'bg-slate-700'}`}></div>
+                    </div>
+                );
+            };
 
             return (
-                <div className="flex flex-col h-full bg-slate-900 text-white">
-                    <div className="flex justify-between items-center bg-slate-800 p-4 shadow-md z-10 shrink-0">
-                        <div className={`flex flex-col ${gameState.turn === otherPlayer.id ? 'opacity-100' : 'opacity-50'}`}>
-                            <span className="text-sm text-slate-400">Adversaire</span>
-                            <span className="text-2xl font-bold">{otherPlayer.scores[otherPlayer.scores.length - 1]} pts</span>
-                            <div className="flex gap-1 mt-1">
-                                {[1, 2].map(i => (
-                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= otherPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
-                                ))}
-                            </div>
+                <div className="min-h-screen flex flex-col p-4 max-w-4xl mx-auto">
+                    {/* Header Scores */}
+                    <div className="flex justify-between items-start mb-8 p-4 bg-slate-800 rounded-2xl shadow-xl border border-slate-700">
+                        <div className={`text-center transition-opacity ${gameState.turn === 'p1' ? 'opacity-100' : 'opacity-50'}`}>
+                            <h2 className={`font-bold ${gameState.turn === 'p1' ? 'text-blue-400' : 'text-slate-400'}`}>
+                                {myPlayerId === 'p1' ? 'Vous (Joueur 1)' : 'Joueur 1'}
+                            </h2>
+                            <div className="text-3xl font-black">{gameState.players.p1.score} <span className="text-sm font-normal">pts</span></div>
+                            {renderStrikes(gameState.players.p1.strikes)}
                         </div>
-
-                        <div className="text-center font-bold text-amber-400 tracking-widest text-sm">
-                            {potentialTurnScore > 0 && (
-                                <div className="bg-slate-900 px-4 py-2 rounded-full border border-slate-700 shadow-inner">
-                                    Tour: +{potentialTurnScore}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className={`flex flex-col text-right ${gameState.turn === myPlayerId ? 'opacity-100' : 'opacity-50'}`}>
-                            <span className="text-sm text-emerald-400">Vous (Joueur {myPlayerId + 1})</span>
-                            <span className="text-2xl font-bold">{myPlayer.scores[myPlayer.scores.length - 1]} pts</span>
-                            <div className="flex gap-1 mt-1 justify-end">
-                                {[1, 2].map(i => (
-                                    <div key={i} className={`w-3 h-3 rounded-full ${i <= myPlayer.coches ? 'bg-red-500' : 'bg-slate-700'}`} />
-                                ))}
-                            </div>
+                        <div className={`text-center transition-opacity ${gameState.turn === 'p2' ? 'opacity-100' : 'opacity-50'}`}>
+                            <h2 className={`font-bold ${gameState.turn === 'p2' ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {myPlayerId === 'p2' ? 'Vous (Joueur 2)' : 'Joueur 2'}
+                            </h2>
+                            <div className="text-3xl font-black">{gameState.players.p2.score} <span className="text-sm font-normal">pts</span></div>
+                            {renderStrikes(gameState.players.p2.strikes)}
                         </div>
                     </div>
 
-                    <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
-                        <div className="absolute top-4 left-4 right-4 h-24 overflow-hidden pointer-events-none opacity-60 text-sm text-center">
-                            {gameState.logs.map((log, i) => (
-                                <div key={i} className={`mb-1 ${i === 0 ? 'text-white font-bold' : 'text-slate-400'}`}>
-                                    {log}
-                                </div>
+                    <div className="text-center font-semibold text-amber-400 mb-8 h-6">
+                        {gameState.message}
+                    </div>
+
+                    {/* Zone de Jeu */}
+                    <div className="flex-1 flex flex-col items-center justify-center">
+                        {!isMyTurn && gameState.dices.length > 0 && (
+                            <p className="text-slate-400 mb-4 animate-pulse">Votre adversaire réfléchit...</p>
+                        )}
+                        <div className="flex flex-wrap justify-center gap-4 mb-8 min-h-[80px]">
+                            {gameState.dices.map((dice, idx) => (
+                                <button
+                                    key={dice.id}
+                                    onClick={() => isMyTurn && toggleDice(idx)}
+                                    disabled={!isMyTurn}
+                                    className={`p-3 rounded-2xl shadow-lg transition-transform ${isMyTurn ? 'hover:scale-105 hover:-translate-y-1' : 'cursor-not-allowed'} ${dice.selected ? 'bg-emerald-500 text-white shadow-emerald-500/50' : 'bg-white text-slate-800'}`}
+                                >
+                                    <DiceIcon value={dice.value} selected={dice.selected} />
+                                </button>
                             ))}
                         </div>
 
-                        {!isMyTurn && (
-                            <div className="text-amber-400/80 font-bold mb-4 animate-pulse">
-                                L'adversaire réfléchit...
+                        {gameState.dices.length > 0 && (
+                            <div className={`px-4 py-2 rounded-full font-bold mb-8 transition-colors ${valid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {valid ? `Sélection : +${score} pts` : 'Sélection invalide'}
                             </div>
                         )}
 
-                        <div className="flex flex-wrap gap-4 justify-center mt-6">
-                            {gameState.dice.map(renderDie)}
+                        <div className="text-2xl text-slate-300 mb-8">
+                            Total en cours : <span className="font-bold text-white">{totalPending}</span> pts
                         </div>
 
-                        <div className="h-8 mt-6">
-                            {selectedDice.length > 0 && (
-                                <span className={`px-4 py-1 rounded-full text-sm font-bold ${selectionValid ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {selectionValid ? `Sélection : +${currentSelectionScore} pts` : 'Sélection invalide'}
-                                </span>
-                            )}
-                        </div>
+                        {isMyTurn && (
+                            <div className="flex gap-4">
+                                {gameState.dices.length === 0 ? (
+                                    <button onClick={rollDices} className="px-8 py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-xl shadow-lg shadow-amber-500/30 transition-transform active:scale-95">
+                                        Lancer les dés
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button 
+                                            onClick={saveSelection} 
+                                            disabled={!valid}
+                                            className={`px-8 py-4 font-bold rounded-xl shadow-lg transition-all active:scale-95 ${valid ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                                        >
+                                            Relancer le reste
+                                        </button>
+                                        <button 
+                                            onClick={bankPoints} 
+                                            disabled={!valid || isEndingIn50}
+                                            className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+                                        >
+                                            {isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder'}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
-                        <div className="mt-8 flex gap-4 w-full max-w-sm">
-                            <button 
-                                onClick={handleRoll}
-                                disabled={!canRoll}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canRoll ? 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_4px_0_0_rgba(79,70,229,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-                            >
-                                {gameState.rollCount === 0 ? 'Lancer les dés' : 'Relancer'}
-                            </button>
-                            
-                            <button 
-                                onClick={handleBank}
-                                disabled={!canBank}
-                                className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${canBank ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_4px_0_0_rgba(16,185,129,0.5)] active:shadow-none active:translate-y-1' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-                            >
-                                {/* Changement dynamique du texte si ça finit par 50 */}
-                                {isMyTurn && potentialTurnScore > 0 && !scoreDoesNotEndIn50 ? 'Finit par 50 !' : 'Garder'}
-                            </button>
-                        </div>
-                        
-                        <div className="mt-12 flex gap-6 text-xs text-slate-500">
-                            <button onClick={() => {
-                                let state = JSON.parse(JSON.stringify(initialGameState));
-                                pushState(state);
-                            }} className="hover:text-slate-300">
-                                Réinitialiser la partie
-                            </button>
-                            <button onClick={() => {
-                                let state = JSON.parse(JSON.stringify(gameState));
-                                state.players[myPlayerId].joined = false;
-                                pushState(state);
-                                localStorage.removeItem('10000_playerId');
-                                setMyPlayerId(null);
-                            }} className="hover:text-slate-300">
-                                Quitter la table
-                            </button>
-                        </div>
+                    <div className="mt-auto pt-8 flex justify-between text-xs text-slate-500">
+                        <button onClick={leaveGame} className="hover:text-slate-300 underline">Quitter ma place</button>
+                        <button onClick={resetTable} className="hover:text-red-400 text-red-500/50 underline">Réinitialiser la partie</button>
                     </div>
                 </div>
             );
