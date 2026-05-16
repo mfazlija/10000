@@ -361,6 +361,7 @@
                 const otherPlayerId = gameState.turn === 'p1' ? 'p2' : 'p1';
                 const otherPlayer = gameState.players[otherPlayerId];
 
+                // Note: La sécurité côté logique reste présente, mais le bouton sera déjà désactivé grâce à la nouvelle interface
                 if (currentPlayer.score === 0 && totalTurnScore < 500) {
                     const newDices = gameState.dices.map(d => ({...d, busted: true, selected: false}));
                     updateGame({ 
@@ -454,8 +455,13 @@
             const count5s = gameState.dices ? gameState.dices.filter(d => d.value === 5 && d.selected && !d.busted).length : 0;
             const canTradeFives = count5s === 2 && !isFull && !isStraight;
 
-            // NOUVELLE VÉRIFICATION : Si tous les dés présents sur la table sont verts, on oblige à relancer
+            // VÉRIFICATION 1 : Relance obligatoire si on a la "main pleine"
             const allDicesScoring = gameState.dices && gameState.dices.length > 0 && gameState.dices.every(d => d.selected && !d.busted);
+
+            // VÉRIFICATION 2 : Relance obligatoire si on n'a pas atteint les 500 pour le tout premier score (ouverture)
+            const myScore = gameState.players[myPlayerId].score;
+            const isOpeningPhase = myScore === 0;
+            const needsMorePointsToOpen = isOpeningPhase && totalPending > 0 && totalPending < 500;
 
             const renderStrikes = (strikes) => (
                 <div className="flex gap-1 mt-1 justify-center">
@@ -488,7 +494,7 @@
                         
                         <div className="relative flex flex-wrap justify-center gap-4 mb-8 min-h-[80px] w-full">
                             {gameState.dices.map((dice, idx) => (
-                                <div key={dice.id} className={`relative p-3 rounded-2xl shadow-lg transition-transform ${dice.selected && !dice.busted ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'}`}>
+                                <div key={dice.id} className={`relative p-3 rounded-2xl shadow-lg transition-transform ${dice.selected && !dice.busted ? 'bg-emerald-500 text-white shadow-emerald-500/50 scale-105 -translate-y-1' : 'bg-white text-slate-800'} ${dice.busted ? 'ring-4 ring-red-500 bg-red-50 text-slate-800' : ''}`}>
                                     <DiceIcon value={dice.value} selected={dice.selected && !dice.busted} />
                                 </div>
                             ))}
@@ -536,9 +542,9 @@
                                             {allDicesScoring ? 'Continuer (Main pleine)' : 'Relancer le reste'}
                                         </button>
                                         
-                                        {/* Bouton Garder (Désactivé de force si allDicesScoring est vrai) */}
-                                        <button onClick={bankPoints} disabled={!valid || isEndingIn50 || allDicesScoring} className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 && !allDicesScoring ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
-                                            {allDicesScoring ? 'Relance obligatoire !' : (isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder')}
+                                        {/* Bouton Garder (Désactivé de force pour de multiples règles obligatoires) */}
+                                        <button onClick={bankPoints} disabled={!valid || isEndingIn50 || allDicesScoring || needsMorePointsToOpen} className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 && !allDicesScoring && !needsMorePointsToOpen ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
+                                            {allDicesScoring ? 'Relance obligatoire !' : (needsMorePointsToOpen ? 'Il faut 500 pour ouvrir' : (isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder'))}
                                         </button>
                                     </>
                                 )}
