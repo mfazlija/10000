@@ -454,6 +454,9 @@
             const count5s = gameState.dices ? gameState.dices.filter(d => d.value === 5 && d.selected && !d.busted).length : 0;
             const canTradeFives = count5s === 2 && !isFull && !isStraight;
 
+            // NOUVELLE VÉRIFICATION : Si tous les dés présents sur la table sont verts, on oblige à relancer
+            const allDicesScoring = gameState.dices && gameState.dices.length > 0 && gameState.dices.every(d => d.selected && !d.busted);
+
             const renderStrikes = (strikes) => (
                 <div className="flex gap-1 mt-1 justify-center">
                     <div className={`w-3 h-3 rounded-full ${strikes >= 1 ? 'bg-red-500' : 'bg-slate-700'}`}></div>
@@ -527,9 +530,15 @@
                                                 🔄 5+5 ➔ 1
                                             </button>
                                         )}
-                                        <button onClick={saveSelection} disabled={!valid} className={`px-8 py-4 font-bold rounded-xl shadow-lg transition-all active:scale-95 ${valid ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>Relancer le reste</button>
-                                        <button onClick={bankPoints} disabled={!valid || isEndingIn50} className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
-                                            {isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder'}
+                                        
+                                        {/* Bouton de Relance (Texte dynamique si tous les dés marquent des points) */}
+                                        <button onClick={saveSelection} disabled={!valid} className={`px-8 py-4 font-bold rounded-xl shadow-lg transition-all active:scale-95 ${valid ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>
+                                            {allDicesScoring ? 'Continuer (Main pleine)' : 'Relancer le reste'}
+                                        </button>
+                                        
+                                        {/* Bouton Garder (Désactivé de force si allDicesScoring est vrai) */}
+                                        <button onClick={bankPoints} disabled={!valid || isEndingIn50 || allDicesScoring} className={`px-8 py-4 font-bold rounded-xl transition-all active:scale-95 ${valid && !isEndingIn50 && !allDicesScoring ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
+                                            {allDicesScoring ? 'Relance obligatoire !' : (isEndingIn50 ? 'Finit par 50 ! (Relance)' : 'Garder')}
                                         </button>
                                     </>
                                 )}
